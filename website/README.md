@@ -129,3 +129,18 @@ LIS_RECORDING_DIR=/path/to/test_1_20261114_162048 node --test src/recording/reco
 1. Export a free humanoid avatar from **VRoid Studio / VRoid Hub** (`.vrm`) or **Ready Player Me** (`.glb` with ARKit blendshapes).
 2. In the web app, click **Load VRM / GLB** at the top right to test the local file with `@pixiv/three-vrm`.
 3. If the morph target names differ from the ARKit standard, update `retargeting.face_blendshape_map` in `config/sensors_and_retargeting.yaml` and re-run `python3 -m pipeline.run_pipeline` (for recordings: `FACE_BLENDSHAPE_MAP` in `src/recording/recordingRetarget.ts`).
+
+### Face rig: three levels, chosen per channel
+
+The avatar loader drives the 9 face channels (`mouthOpen`, `mouthSmile`, `mouthFrown`, `mouthPucker`, `browUp`, `browDown`, `eyeBlinkLeft`, `eyeBlinkRight`, `cheekPuff`) with the best source the model has, channel by channel:
+
+1. **Authored blendshapes** (ARKit, VRM/RPM visemes, …) when the model has them.
+2. **Facial bones** (Rigify `DEF-lid`, `DEF-brow`, `jaw_master`, generic jaw) for the channels still missing.
+3. **Automatic facial rig** (`src/three/autoFaceRig.ts`) for whatever is left. Models such as Avaturn exports have neither blendshapes nor face bones, only a `Head` bone. The loader then:
+   - finds the face mesh among the meshes skinned to the head;
+   - detects the landmarks from its geometry: nose tip, lip line (the shallow hollow between the lips, at about 1/3 from subnasale to chin), eye sockets (profile concavity), brows, face width;
+   - generates procedural blendshapes fitted to that face (jaw rotation around a hinge near the ears, lid closure, brow raise, mouth corners, lips, cheeks).
+
+   Other head meshes (eyebrows, lashes, beard) follow only near the skin; hair strands do not. The viewport label shows `auto face rig (N channels)`.
+
+Limits of level 3: meshes with closed lips have no mouth interior, so `mouthOpen` stretches the lips instead of showing teeth; painted eyes close by folding the lid texture. Test it on a real model with `LIS_AVATAR_GLB=/path/avatar.glb npx tsx --test src/three/autoFaceRig.test.ts`.

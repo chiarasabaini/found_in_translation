@@ -470,13 +470,13 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
           api.skeletonHelper.visible = skeletonDebug;
           api.mixer = new THREE.AnimationMixer(loaded.root);
           api.activeAction = null;
-          const morphCount = loaded.rigTarget.availableMorphs.size;
-          const faceLabel =
-            morphCount > 0
-              ? `${morphCount} morphs`
-              : loaded.hasFacialBoneRig
-                ? 'face bone rig'
-                : '0 morphs';
+          const autoChannels = loaded.autoFaceRig?.channels.length ?? 0;
+          const authoredMorphs = loaded.rigTarget.availableMorphs.size - autoChannels;
+          const faceParts: string[] = [];
+          if (authoredMorphs > 0) faceParts.push(`${authoredMorphs} morphs`);
+          if (loaded.hasFacialBoneRig) faceParts.push('face bone rig');
+          if (autoChannels > 0) faceParts.push(`auto face rig (${autoChannels} channels)`);
+          const faceLabel = faceParts.length ? faceParts.join(' + ') : 'no face rig';
           const boneLabel =
             loaded.drivenBonesCount > loaded.matchedBonesCount
               ? `${loaded.matchedBonesCount} (${loaded.drivenBonesCount} driven) bones`

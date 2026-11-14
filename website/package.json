@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/recording/recording.test.ts src/utils/matcher.test.ts src/utils/clipBuilder.test.ts src/i18n/languages.test.ts src/generation/mockMotionModel.test.ts"
+    "test": "tsx --test src/recording/recording.test.ts src/utils/matcher.test.ts src/utils/clipBuilder.test.ts src/i18n/languages.test.ts src/generation/mockMotionModel.test.ts src/three/autoFaceRig.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

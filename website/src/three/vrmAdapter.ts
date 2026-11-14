@@ -8,6 +8,7 @@ import {
   matchGlbBoneNames,
   normalizeAvatarRootTransform,
 } from './universalSkeleton';
+import type { AutoFaceRigResult } from './autoFaceRig';
 
 export { matchGlbBoneNames, analyzeUniversalAvatarRig, normalizeAvatarRootTransform };
 
@@ -20,6 +21,8 @@ export interface LoadedVrmAvatar {
   matchedBonesCount: number;
   drivenBonesCount: number;
   hasFacialBoneRig: boolean;
+  /** Procedural face blendshapes fitted to the head geometry (null if the model needed none). */
+  autoFaceRig: AutoFaceRigResult | null;
   dispose: () => void;
 }
 
@@ -66,6 +69,7 @@ export async function loadVrmOrGlbFromArrayBuffer(buffer: ArrayBuffer): Promise<
     matchedBonesCount: analysis.matchedBonesCount,
     drivenBonesCount: analysis.drivenBonesCount,
     hasFacialBoneRig: analysis.hasFacialBoneRig,
+    autoFaceRig: analysis.autoFaceRig,
     rigTarget: analysis.rigTarget,
     dispose: () => {
       skeletonHelper.dispose();

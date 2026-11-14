@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { type VRM, VRMHumanBoneName } from '@pixiv/three-vrm';
 import type { AvatarRigTarget, MorphTargetMeshBinding, RetargetFrameContext } from '../utils/clipBuilder';
+import { buildAutomaticFaceRig, FACE_CHANNELS, type AutoFaceRigResult } from './autoFaceRig';
 
 export type Side = 'left' | 'right';
 export const FINGER_NAMES = ['Thumb', 'Index', 'Middle', 'Ring', 'Little'] as const;
@@ -600,6 +601,8 @@ export interface UniversalRigAnalysis {
   matchedBonesCount: number;
   drivenBonesCount: number;
   hasFacialBoneRig: boolean;
+  /** Procedural face blendshapes generated for channels the model did not cover (null if none). */
+  autoFaceRig: AutoFaceRigResult | null;
   /** Deform bones suitable for a clean SkeletonHelper visualization */
   visualBones: THREE.Bone[];
 }
@@ -985,6 +988,8 @@ function createFacialBoneTrackBuilder(
   modelHeight: number,
 ): {
   hasFacialBoneRig: boolean;
+  /** Face channels driven by the facial bones found in the model. */
+  coveredMorphs: Set<string>;
   buildFacialBoneTracks: (
     morphTracks: Record<string, number[]>,
     times: number[],
@@ -1269,7 +1274,11 @@ function createFacialBoneTrackBuilder(
     return outTracks;
   };
 
-  return { hasFacialBoneRig, buildFacialBoneTracks };
+  const coveredMorphs = new Set<string>();
+  if (jawDrivers.length > 0) coveredMorphs.add('mouthOpen');
+  for (const pd of posDrivers) for (const inf of pd.influences) coveredMorphs.add(inf.morph);
+
+  return { hasFacialBoneRig, coveredMorphs, buildFacialBoneTracks };
 }
 
 /**
@@ -2143,15 +2152,32 @@ export function analyzeUniversalAvatarRig(
     }
   }
 
-  const { hasFacialBoneRig, buildFacialBoneTracks } = createFacialBoneTrackBuilder(
-    root,
-    headNode,
-    coveredCanonicalMorphs,
-    hasWeightedSkin,
-    weightByBone,
-    trackKeyOf,
-    modelHeight,
+  const { hasFacialBoneRig, coveredMorphs: boneCoveredMorphs, buildFacialBoneTracks } =
+    createFacialBoneTrackBuilder(
+      root,
+      headNode,
+      coveredCanonicalMorphs,
+      hasWeightedSkin,
+      weightByBone,
+      trackKeyOf,
+      modelHeight,
+    );
+
+  // Automatic facial rig: procedural blendshapes, fitted to the head geometry, for every
+  // channel that neither the model's blendshapes nor its facial bones cover.
+  const missingFaceChannels = FACE_CHANNELS.filter(
+    (c) => !coveredCanonicalMorphs.has(c) && !boneCoveredMorphs.has(c),
   );
+  const autoFaceRig = buildAutomaticFaceRig(root, headNode, missingFaceChannels, trackKeyOf);
+  if (autoFaceRig) {
+    for (const m of autoFaceRig.meshes) {
+      const existing = morphTargetMeshes.find((b) => b.meshName === m.meshName);
+      if (existing) m.morphs.forEach((n) => existing.availableMorphs.add(n));
+      else morphTargetMeshes.push({ meshName: m.meshName, availableMorphs: new Set(m.morphs) });
+      m.morphs.forEach((n) => availableMorphs.add(n));
+    }
+    primaryFaceMeshName ??= autoFaceRig.meshes[0]?.meshName ?? null;
+  }
 
   // Filter visual deform bones for clean SkeletonHelper visualization (hiding Rigify VIS_/WGT-/MCH-/IK clutter)
   const visualBones: THREE.Bone[] = [];
@@ -2180,6 +2206,7 @@ export function analyzeUniversalAvatarRig(
     matchedBonesCount: Object.keys(boneNodeNames).length,
     drivenBonesCount: drivenBoneTrackNames.length,
     hasFacialBoneRig,
+    autoFaceRig,
     visualBones,
   };
 }
