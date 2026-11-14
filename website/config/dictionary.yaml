@@ -1,0 +1,328 @@
+# Closed-set Italian Sign Language (LIS) Dictionary Configuration
+# Each entry maps a canonical Italian phrase to paraphrases/synonyms,
+# spatial body-relative anchors (since Smartgloves II lack global body position),
+# and optional manual prototype override.
+
+metadata:
+  language: "it-IT"
+  sign_language: "LIS"
+  # Language of the base phrase/synonyms/description fields below
+  base_language: "it"
+  source_languages:
+    - "en"
+    - "it"
+  target_fps: 30
+  match_threshold: 0.52
+  max_suggestions: 3
+
+classes:
+  - id: "ciao"
+    phrase: "Ciao"
+    category: "Saluti"
+    description: "Mano destra aperta vicino alla tempia/spalla con oscillazione laterale e sorriso."
+    translations:
+      en:
+        phrase: "Hello"
+        category: "Greetings"
+        description: "Open right hand near the temple/shoulder with a side-to-side wave and a smile."
+        synonyms:
+          - "hi"
+          - "hey"
+          - "good morning"
+          - "good evening"
+          - "hello everyone"
+    two_handed: false
+    manual_prototype: null
+    synonyms:
+      - "salve"
+      - "buongiorno"
+      - "buonasera"
+      - "ehi ciao"
+      - "ciao a tutti"
+    anchor:
+      # Torso-relative target in meters (right-handed Y-up, +Z forward, +X avatar-left / -X avatar-right)
+      # Note: in standard VRM/Three.js (+X = character's left, -X = character's right)
+      right_hand: [-0.26, 1.48, 0.24]
+      left_hand: [-0.20, 0.92, 0.08]
+      right_wrist_euler_deg: [12.0, -15.0, -8.0]
+      left_wrist_euler_deg: [0.0, 0.0, 0.0]
+      motion_arc: "wave_side"
+      motion_amplitude: [0.09, 0.03, 0.02]
+      duration_sec: 1.5
+
+  - id: "grazie"
+    phrase: "Grazie"
+    category: "Cortesia"
+    description: "Punta delle dita della mano destra al mento che si estende in avanti verso l'interlocutore."
+    translations:
+      en:
+        phrase: "Thank you"
+        category: "Courtesy"
+        description: "Right-hand fingertips at the chin, moving forward toward the other person."
+        synonyms:
+          - "thanks"
+          - "thanks a lot"
+          - "many thanks"
+          - "thank you very much"
+    two_handed: false
+    manual_prototype: null
+    synonyms:
+      - "grazie mille"
+      - "ti ringrazio"
+      - "molte grazie"
+      - "ringrazio"
+    anchor:
+      right_hand: [-0.04, 1.44, 0.26]
+      left_hand: [0.20, 0.92, 0.08]
+      right_wrist_euler_deg: [-25.0, 10.0, 5.0]
+      left_wrist_euler_deg: [0.0, 0.0, 0.0]
+      motion_arc: "chin_forward"
+      motion_amplitude: [0.02, -0.06, 0.18]
+      duration_sec: 1.4
+
+  - id: "per_favore"
+    phrase: "Per favore"
+    category: "Cortesia"
+    description: "Mano destra piatta sul petto con movimento circolare lento ed espressione cortese."
+    translations:
+      en:
+        phrase: "Please"
+        category: "Courtesy"
+        description: "Flat right hand on the chest with a slow circular movement and a polite expression."
+        synonyms:
+          - "pretty please"
+          - "if you please"
+          - "kindly"
+          - "i beg you"
+    two_handed: false
+    manual_prototype: null
+    synonyms:
+      - "per piacere"
+      - "per cortesia"
+      - "ti prego"
+      - "favore"
+    anchor:
+      right_hand: [-0.05, 1.24, 0.22]
+      left_hand: [0.20, 0.92, 0.08]
+      right_wrist_euler_deg: [10.0, 45.0, 15.0]
+      left_wrist_euler_deg: [0.0, 0.0, 0.0]
+      motion_arc: "chest_circle"
+      motion_amplitude: [0.06, 0.06, 0.02]
+      duration_sec: 1.7
+
+  - id: "come_stai"
+    phrase: "Come stai?"
+    category: "Conversazione"
+    description: "Entrambe le mani nello spazio neutro davanti al torace con lieve apertura interrogativa e sopracciglia sollevate."
+    translations:
+      en:
+        phrase: "How are you?"
+        category: "Conversation"
+        description: "Both hands in the neutral space in front of the chest, opening slightly as a question, eyebrows raised."
+        synonyms:
+          - "how is it going"
+          - "are you ok"
+          - "how do you feel"
+          - "how are you doing"
+          - "you all right"
+    two_handed: true
+    manual_prototype: null
+    synonyms:
+      - "come va"
+      - "tutto bene"
+      - "come sta"
+      - "stai bene"
+      - "come ti senti"
+    anchor:
+      right_hand: [-0.18, 1.22, 0.30]
+      left_hand: [0.18, 1.22, 0.30]
+      right_wrist_euler_deg: [-15.0, -20.0, -10.0]
+      left_wrist_euler_deg: [-15.0, 20.0, 10.0]
+      motion_arc: "symmetric_open"
+      motion_amplitude: [0.07, 0.04, 0.06]
+      duration_sec: 1.8
+
+  - id: "mi_chiamo"
+    phrase: "Mi chiamo..."
+    category: "Presentazione"
+    description: "Indice destro che indica il petto e poi si apre verso lo spazio frontale."
+    translations:
+      en:
+        phrase: "My name is..."
+        category: "Introductions"
+        description: "Right index finger points to the chest, then opens toward the front space."
+        synonyms:
+          - "my name is"
+          - "i am called"
+          - "call me"
+          - "i am"
+    two_handed: false
+    manual_prototype: null
+    synonyms:
+      - "il mio nome e"
+      - "mi chiamo"
+      - "sono io"
+      - "come mi chiamo"
+    anchor:
+      right_hand: [-0.06, 1.27, 0.24]
+      left_hand: [0.20, 0.92, 0.08]
+      right_wrist_euler_deg: [-18.0, 35.0, 10.0]
+      left_wrist_euler_deg: [0.0, 0.0, 0.0]
+      motion_arc: "chest_to_front"
+      motion_amplitude: [-0.08, 0.02, 0.14]
+      duration_sec: 1.6
+
+  - id: "non_capisco"
+    phrase: "Non capisco"
+    category: "Comprensione"
+    description: "Mano destra vicino alla fronte/tempia, rotazione del polso con aggrottamento delle sopracciglia e lieve scuotimento del capo."
+    translations:
+      en:
+        phrase: "I don't understand"
+        category: "Comprehension"
+        description: "Right hand near the forehead/temple, wrist rotation with frowning eyebrows and a slight head shake."
+        synonyms:
+          - "i dont understand"
+          - "i did not understand"
+          - "i cannot understand"
+          - "can you repeat"
+          - "sorry i do not understand"
+          - "what did you say"
+    two_handed: false
+    manual_prototype: null
+    synonyms:
+      - "non ho capito"
+      - "non riesco a capire"
+      - "puoi ripetere"
+      - "scusa non capisco"
+      - "cosa hai detto"
+    anchor:
+      right_hand: [-0.16, 1.56, 0.22]
+      left_hand: [0.20, 0.92, 0.08]
+      right_wrist_euler_deg: [15.0, -10.0, 15.0]
+      left_wrist_euler_deg: [0.0, 0.0, 0.0]
+      motion_arc: "temple_twist"
+      motion_amplitude: [0.04, 0.03, 0.05]
+      duration_sec: 1.7
+
+  - id: "aiuto"
+    phrase: "Aiuto"
+    category: "Emergenza"
+    description: "Mano destra chiusa appoggiata sul palmo sinistro aperto che si sollevano insieme con espressione urgente."
+    translations:
+      en:
+        phrase: "Help"
+        category: "Emergency"
+        description: "Closed right hand resting on the open left palm; both rise together with an urgent expression."
+        synonyms:
+          - "help me"
+          - "i need help"
+          - "emergency"
+          - "can you help me"
+    two_handed: true
+    manual_prototype: null
+    synonyms:
+      - "aiutami"
+      - "ho bisogno di aiuto"
+      - "soccorso"
+      - "mi aiuti"
+    anchor:
+      right_hand: [-0.06, 1.20, 0.30]
+      left_hand: [0.06, 1.15, 0.30]
+      right_wrist_euler_deg: [0.0, 10.0, 0.0]
+      left_wrist_euler_deg: [-20.0, 0.0, 0.0]
+      motion_arc: "lift_together"
+      motion_amplitude: [0.01, 0.12, 0.04]
+      duration_sec: 1.5
+
+  - id: "acqua"
+    phrase: "Acqua"
+    category: "Bisogni"
+    description: "Mano destra con indice vicino al mento in movimento breve verticale ripetuto."
+    translations:
+      en:
+        phrase: "Water"
+        category: "Needs"
+        description: "Right index finger near the chin with a short, repeated vertical movement."
+        synonyms:
+          - "i would like some water"
+          - "drink"
+          - "i am thirsty"
+          - "a glass of water"
+    two_handed: false
+    manual_prototype: null
+    synonyms:
+      - "vorrei dell acqua"
+      - "bere"
+      - "ho sete"
+      - "un bicchiere d acqua"
+    anchor:
+      right_hand: [-0.07, 1.44, 0.24]
+      left_hand: [0.20, 0.92, 0.08]
+      right_wrist_euler_deg: [-15.0, 25.0, -10.0]
+      left_wrist_euler_deg: [0.0, 0.0, 0.0]
+      motion_arc: "chin_tap"
+      motion_amplitude: [0.01, -0.05, 0.02]
+      duration_sec: 1.4
+
+  - id: "bagno"
+    phrase: "Bagno"
+    category: "Bisogni"
+    description: "Mano destra configurata davanti alla spalla con oscillazione rapida e sguardo interrogativo."
+    translations:
+      en:
+        phrase: "Bathroom"
+        category: "Needs"
+        description: "Right hand shaped in front of the shoulder with a quick shake and a questioning look."
+        synonyms:
+          - "where is the bathroom"
+          - "toilet"
+          - "restroom"
+          - "washroom"
+          - "i am looking for the bathroom"
+    two_handed: false
+    manual_prototype: null
+    synonyms:
+      - "dov e il bagno"
+      - "toilette"
+      - "servizi"
+      - "cerco il bagno"
+    anchor:
+      right_hand: [-0.20, 1.34, 0.28]
+      left_hand: [0.20, 0.92, 0.08]
+      right_wrist_euler_deg: [5.0, -15.0, 0.0]
+      left_wrist_euler_deg: [0.0, 0.0, 0.0]
+      motion_arc: "wrist_shake"
+      motion_amplitude: [0.05, 0.02, 0.02]
+      duration_sec: 1.4
+
+  - id: "arrivederci"
+    phrase: "Arrivederci"
+    category: "Saluti"
+    description: "Mano destra alta in saluto con chiusura dolce delle dita verso l'esterno."
+    translations:
+      en:
+        phrase: "Goodbye"
+        category: "Greetings"
+        description: "Right hand raised in a wave, fingers gently closing outward."
+        synonyms:
+          - "bye"
+          - "see you soon"
+          - "see you"
+          - "have a nice day"
+          - "farewell"
+    two_handed: false
+    manual_prototype: null
+    synonyms:
+      - "a presto"
+      - "ci vediamo"
+      - "addio"
+      - "buona giornata"
+    anchor:
+      right_hand: [-0.28, 1.46, 0.26]
+      left_hand: [0.20, 0.92, 0.08]
+      right_wrist_euler_deg: [18.0, -10.0, -12.0]
+      left_wrist_euler_deg: [0.0, 0.0, 0.0]
+      motion_arc: "wave_farewell"
+      motion_amplitude: [0.08, 0.04, 0.04]
+      duration_sec: 1.6

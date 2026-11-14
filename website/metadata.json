@@ -1,0 +1,6 @@
+{
+  "name": "LIS Motion Studio",
+  "description": "Retrieval, retargeting and 3D playback of Italian Sign Language (LIS) from Smartgloves II gloves and Face Mesh. English UI, configurable source language.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

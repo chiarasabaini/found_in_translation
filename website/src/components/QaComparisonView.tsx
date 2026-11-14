@@ -1,0 +1,391 @@
+import React, { useMemo, useState } from 'react';
+import type {
+  DictionaryClass,
+  QaSummaryPayload,
+  SignAnimationPayload,
+} from '../types/lis';
+import { AvatarViewport } from './AvatarViewport';
+
+interface QaComparisonViewProps {
+  classes: DictionaryClass[];
+  activeClassId: string | null;
+  activeAnimation: SignAnimationPayload | null;
+  qaSummary: QaSummaryPayload | null;
+  onSelectClass: (cls: DictionaryClass) => void;
+  customAvatarFile: File | null;
+  customAvatarError: string | null;
+  onCustomAvatarError: (err: string | null) => void;
+}
+
+const FINGERS = ['thumb', 'index', 'middle', 'ring', 'little'] as const;
+
+export const QaComparisonView: React.FC<QaComparisonViewProps> = ({
+  classes,
+  activeClassId,
+  activeAnimation,
+  qaSummary,
+  onSelectClass,
+  customAvatarFile,
+  customAvatarError,
+  onCustomAvatarError,
+}) => {
+  const [selectedFinger, setSelectedFinger] = useState<(typeof FINGERS)[number]>('index');
+  const [selectedHand, setSelectedHand] = useState<'right' | 'left'>('right');
+  const [scrubTime, setScrubTime] = useState<number>(0);
+
+  const summaryRow = useMemo(() => {
+    if (!qaSummary || !activeClassId) return null;
+    return qaSummary.classes.find((c) => c.classId === activeClassId) ?? null;
+  }, [qaSummary, activeClassId]);
+
+  const frames = activeAnimation?.qaComparison.frames ?? [];
+  const activeFrameIdx = useMemo(() => {
+    if (!frames.length) return 0;
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    for (let i = 0; i < frames.length; i++) {
+      const d = Math.abs(frames[i].t - scrubTime);
+      if (d < bestDiff) {
+        bestDiff = d;
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  }, [frames, scrubTime]);
+
+  const currentFrame = frames[activeFrameIdx] ?? null;
+  const g1Series = frames.map((fr) => fr[selectedHand].curls_deg_g1[selectedFinger] ?? 0);
+  const g2Series = frames.map((fr) => fr[selectedHand].curls_deg_g2[selectedFinger] ?? 0);
+  const emfSeries = frames.map((fr) => fr[selectedHand].mean_emf_residual ?? 0);
+
+  const sensorStats =
+    selectedHand === 'right'
+      ? activeAnimation?.qaComparison.group1VsGroup2Right ?? []
+      : activeAnimation?.qaComparison.group1VsGroup2Left ?? [];
+
+  const duration = activeAnimation?.duration ?? 1.5;
+
+  return (
+    <div className="flex-1 flex flex-col lg:flex-row overflow-hidden bg-slate-50">
+      {/* Left: Signal Diagnostics & Sensor Comparison */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 border-b lg:border-b-0 lg:border-r border-slate-200 bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="font-display text-xl font-semibold text-slate-900">
+              QA comparison: source clip vs 3D avatar
+            </h1>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Synchronized comparison of Smartgloves II data (Group 1 raw vs Group 2 EM-corrected), EMF residual, face morphs and the avatar IK pose. Clips from recordings show the solved finger flexion; they have no Group 1/2 data.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label htmlFor="qa-class-select" className="text-xs font-medium text-slate-600">
+              Sign:
+            </label>
+            <select
+              id="qa-class-select"
+              value={activeClassId ?? ''}
+              onChange={(e) => {
+                const found = classes.find((c) => c.id === e.target.value);
+                if (found) {
+                  setScrubTime(0);
+                  onSelectClass(found);
+                }
+              }}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
+            >
+              {classes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.phrase} ({c.prototypeClipId})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Summary Metrics Strip */}
+        {summaryRow && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 rounded-xl border border-slate-200 bg-slate-50/70">
+            <div>
+              <div className="text-xs text-slate-500">DTW prototype</div>
+              <div className="mt-1 font-mono text-sm font-semibold text-slate-900 tabular-nums">
+                {summaryRow.prototypeClipId}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">Wrist IK error</div>
+              <div className="mt-1 font-mono text-sm font-semibold text-slate-900 tabular-nums">
+                {summaryRow.rmsWristReachErrorCm.toFixed(2)} cm
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">G1 vs G2 delta</div>
+              <div className="mt-1 font-mono text-sm font-semibold text-slate-900 tabular-nums">
+                {summaryRow.rmsGroup1VsGroup2CurlDeg.toFixed(2)}°
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">Max EMF residual</div>
+              <div className="mt-1 font-mono text-sm font-semibold text-slate-900 tabular-nums">
+                {summaryRow.maxMeanEmfResidual.toFixed(4)}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Synchronized Scrubber & Selectors */}
+        <div className="p-4 rounded-xl border border-slate-200 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg" role="group" aria-label="QA hand">
+                {(['right', 'left'] as const).map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => setSelectedHand(h)}
+                    className={`px-3 py-1 text-xs font-medium rounded-md cursor-pointer ${
+                      selectedHand === h
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {h === 'right' ? 'Right hand' : 'Left hand'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg" role="group" aria-label="QA finger">
+                {FINGERS.map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setSelectedFinger(f)}
+                    className={`px-2.5 py-1 text-xs font-medium rounded-md capitalize cursor-pointer ${
+                      selectedFinger === f
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="font-mono text-xs text-slate-600 tabular-nums">
+              Frame {activeFrameIdx + 1}/{Math.max(1, frames.length)} · t = {scrubTime.toFixed(2)}s
+            </div>
+          </div>
+
+          <input
+            type="range"
+            min={0}
+            max={duration}
+            step={0.01}
+            value={Math.min(scrubTime, duration)}
+            onChange={(e) => setScrubTime(parseFloat(e.target.value))}
+            aria-label="QA comparison timeline"
+            className="w-full accent-blue-600 cursor-pointer"
+          />
+
+          {/* SVG Signal Plot: Group 1 vs Group 2 Finger Curl & EMF Residual */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <SignalPlotCard
+              title={`${selectedFinger} flexion (${selectedHand === 'right' ? 'R' : 'L'}): G1 vs G2`}
+              unit="°"
+              seriesA={g1Series}
+              seriesB={g2Series}
+              labelA="Group 1 (raw)"
+              labelB="Group 2 (EM)"
+              maxVal={140}
+              cursorRatio={duration > 0 ? scrubTime / duration : 0}
+            />
+            <SignalPlotCard
+              title="Residuo EMF medio (post-pulizia)"
+              unit=""
+              seriesA={emfSeries}
+              seriesB={[]}
+              labelA="EMF residual"
+              labelB=""
+              maxVal={0.4}
+              cursorRatio={duration > 0 ? scrubTime / duration : 0}
+            />
+          </div>
+        </div>
+
+        {/* Frame Snapshot Readout */}
+        {currentFrame && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 rounded-xl border border-slate-200">
+              <h2 className="font-display text-sm font-semibold text-slate-900 mb-2">
+                Wrist and fingers at the current frame
+              </h2>
+              <div className="text-xs text-slate-600 space-y-1.5 font-mono tabular-nums">
+                <div>
+                  Target anchor: [{currentFrame[selectedHand].target_wrist.join(', ')}]
+                </div>
+                <div>
+                  Rig IK wrist: [{currentFrame[selectedHand].achieved_wrist.join(', ')}]
+                </div>
+                <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2">
+                  {FINGERS.map((f) => (
+                    <div key={f} className="flex justify-between">
+                      <span className="font-sans text-slate-600 capitalize">{f}:</span>
+                      <span>
+                        {currentFrame[selectedHand].curls_deg_g2[f]?.toFixed(1) ?? '0.0'}°
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border border-slate-200">
+              <h2 className="font-display text-sm font-semibold text-slate-900 mb-2">
+                Face morph targets (Face Mesh)
+              </h2>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs font-mono tabular-nums">
+                {Object.entries(currentFrame.morphs).map(([m, val]) => (
+                  <div key={m} className="flex items-center justify-between gap-2">
+                    <span className="font-sans text-slate-600 truncate">{m}</span>
+                    <span className="text-slate-900">{val.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Group 1 vs Group 2 Sensor Divergence Table */}
+        <div className="rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+            <h2 className="font-display text-sm font-semibold text-slate-900">
+              Group 1 (raw) vs Group 2 (EM) diagnostics — {selectedHand === 'right' ? 'Right hand' : 'Left hand'}
+            </h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-white border-b border-slate-200 text-slate-500">
+                <tr>
+                  <th className="py-2.5 px-4 font-medium">Sensor</th>
+                  <th className="py-2.5 px-4 font-medium">RMS Pos (mm)</th>
+                  <th className="py-2.5 px-4 font-medium">RMS Ang (°)</th>
+                  <th className="py-2.5 px-4 font-medium">Mean EMF</th>
+                  <th className="py-2.5 px-4 font-medium">Dropout G1 / G2</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-mono tabular-nums">
+                {sensorStats.map((st) => (
+                  <tr key={st.sensor_name} className="bg-white">
+                    <td className="py-2 px-4 font-sans font-medium text-slate-900 capitalize">
+                      {st.sensor_name}
+                    </td>
+                    <td className="py-2 px-4 text-slate-700">
+                      {(st.rms_position_diff_m * 1000).toFixed(2)}
+                    </td>
+                    <td className="py-2 px-4 text-slate-700">
+                      {st.rms_angle_diff_deg.toFixed(2)}
+                    </td>
+                    <td className="py-2 px-4 text-slate-700">
+                      {st.mean_emf_residual.toFixed(4)}
+                    </td>
+                    <td className="py-2 px-4 text-slate-700">
+                      {(st.group1_dropout_rate * 100).toFixed(1)}% /{' '}
+                      {(st.group2_dropout_rate * 100).toFixed(1)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: Synchronized 3D Avatar Viewport */}
+      <div className="w-full lg:w-[48%] h-[420px] lg:h-full shrink-0">
+        <AvatarViewport
+          animation={activeAnimation}
+          playTrigger={0}
+          customAvatarFile={customAvatarFile}
+          customAvatarError={customAvatarError}
+          onCustomAvatarError={onCustomAvatarError}
+          externalTimeSec={scrubTime}
+          onTimeUpdate={(t) => setScrubTime(t)}
+        />
+      </div>
+    </div>
+  );
+};
+
+interface SignalPlotCardProps {
+  title: string;
+  unit: string;
+  seriesA: number[];
+  seriesB: number[];
+  labelA: string;
+  labelB: string;
+  maxVal: number;
+  cursorRatio: number;
+}
+
+const SignalPlotCard: React.FC<SignalPlotCardProps> = ({
+  title,
+  unit,
+  seriesA,
+  seriesB,
+  labelA,
+  labelB,
+  maxVal,
+  cursorRatio,
+}) => {
+  const width = 320;
+  const height = 100;
+
+  const toPath = (vals: number[]) => {
+    if (vals.length < 2) return '';
+    return vals
+      .map((v, i) => {
+        const x = (i / (vals.length - 1)) * width;
+        const y = height - Math.max(0, Math.min(1, v / maxVal)) * (height - 12) - 6;
+        return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+  };
+
+  const cursorX = Math.max(0, Math.min(width, cursorRatio * width));
+
+  return (
+    <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className="text-xs font-medium text-slate-800 truncate">{title}</span>
+        <span className="text-[11px] font-mono text-slate-500 tabular-nums">
+          max {maxVal}
+          {unit}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-24 bg-white rounded border border-slate-100">
+        <line x1={0} y1={height / 2} x2={width} y2={height / 2} stroke="#e2e8f0" strokeDasharray="3 3" />
+        {seriesA.length > 1 && (
+          <path d={toPath(seriesA)} fill="none" stroke="#94a3b8" strokeWidth={1.75} />
+        )}
+        {seriesB.length > 1 && (
+          <path d={toPath(seriesB)} fill="none" stroke="#2563eb" strokeWidth={2} />
+        )}
+        <line x1={cursorX} y1={0} x2={cursorX} y2={height} stroke="#dc2626" strokeWidth={1.5} />
+      </svg>
+      <div className="mt-1.5 flex items-center gap-4 text-[11px] text-slate-600">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="w-2.5 h-0.5 bg-slate-400 inline-block" />
+          {labelA}
+        </span>
+        {labelB && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-0.5 bg-blue-600 inline-block" />
+            {labelB}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+};

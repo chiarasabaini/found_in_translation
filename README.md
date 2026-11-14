@@ -15,6 +15,7 @@
 - [Summary](#summary)
 - [Description](#description)
 - [Requirements](#requirements)
+- [Website](#website)
 - [Notes](#notes)
 
 ---
@@ -28,6 +29,15 @@ Lorem ipsum dolor sit amed.
 # Requirements
 
 - Rokoko Gloves
+- Node.js (for the website)
+
+---
+
+# Website
+
+[`website/`](website/) contains **LIS Motion Studio**, the web app that turns a typed phrase (English or Italian) into Italian Sign Language (LIS) on a 3D avatar. It also imports real Rokoko Smartgloves recordings. A mock text-to-motion model stands in for the real one until it is ready.
+
+Run it with `cd website && npm install && npm run dev`, then open http://localhost:3000. Details are in [`website/README.md`](website/README.md).
 
 ---
 
