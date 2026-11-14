@@ -581,7 +581,7 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
           <div className="text-xs text-slate-500">
             {customAvatarFile
               ? `${customAvatarFile.name}${customAvatarInfo ? ` · ${customAvatarInfo}` : ''}`
-              : 'Humanoid avatar · 54 bones + face morphs'}
+              : 'Humanoid avatar · 54 body bones + 10 facial bones + blendshapes'}
           </div>
           <div className="text-sm font-display font-semibold text-slate-900">
             {animation ? animation.phrase : 'Waiting for a phrase'}

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import * as THREE from 'three';
-import { buildAutomaticFaceRig, detectFaceLandmarks, FACE_CHANNELS } from './autoFaceRig';
+import { buildAutomaticFaceRig, detectFaceLandmarks, faceChannelDisplacement, FACE_CHANNELS } from './autoFaceRig';
 import { loadVrmOrGlbFromArrayBuffer } from './vrmAdapter';
 import { buildSignAnimationClip } from '../utils/clipBuilder';
 import type { SignAnimationPayload } from '../types/lis';
@@ -64,9 +64,41 @@ function worldPoints(mesh: THREE.SkinnedMesh): THREE.Vector3[] {
   });
 }
 
-function morphDelta(mesh: THREE.Mesh, name: string, i: number): THREE.Vector3 {
-  const idx = mesh.morphTargetDictionary![name];
-  return new THREE.Vector3().fromBufferAttribute(mesh.geometry.morphAttributes.position![idx], i);
+/**
+ * Displacement of vertex i when one channel is at weight 1, as the renderer computes it:
+ * facial bone pose (from the rig's bone tracks) + residual morph target + skinning.
+ */
+function channelDelta(
+  root: THREE.Object3D,
+  mesh: THREE.SkinnedMesh,
+  rig: { buildFacialBoneTracks: (m: Record<string, number[]>, t: number[]) => THREE.KeyframeTrack[] },
+  channel: string,
+  i: number,
+): THREE.Vector3 {
+  const rest = mesh.getVertexPosition(i, new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
+  const tracks = rig.buildFacialBoneTracks({ [channel]: [0, 1] }, [0, 1]);
+  const mixer = new THREE.AnimationMixer(root);
+  const action = mixer.clipAction(new THREE.AnimationClip('t', 1, tracks));
+  action.setLoop(THREE.LoopOnce, 1);
+  action.clampWhenFinished = true;
+  action.play();
+  mixer.setTime(1);
+  const idx = mesh.morphTargetDictionary?.[channel];
+  if (idx !== undefined) mesh.morphTargetInfluences![idx] = 1;
+  root.updateMatrixWorld(true);
+  const posed = mesh.getVertexPosition(i, new THREE.Vector3()).applyMatrix4(mesh.matrixWorld);
+  if (idx !== undefined) mesh.morphTargetInfluences![idx] = 0;
+  action.stop();
+  mixer.uncacheRoot(root);
+  root.traverse((o) => {
+    if (o.name.startsWith('AutoFace_')) {
+      const b = o as THREE.Bone & { userData: { bindPos?: THREE.Vector3; bindQuat?: THREE.Quaternion } };
+      if (b.userData.bindPos) b.position.copy(b.userData.bindPos);
+      if (b.userData.bindQuat) b.quaternion.copy(b.userData.bindQuat);
+    }
+  });
+  root.updateMatrixWorld(true);
+  return posed.sub(rest);
 }
 
 test('detectFaceLandmarks finds nose, mouth line and eyes on a synthetic head', () => {
@@ -81,14 +113,28 @@ test('detectFaceLandmarks finds nose, mouth line and eyes on a synthetic head', 
   assert.ok(L.browY > L.eyeY && L.browY < L.eyeY + 0.04);
 });
 
-test('buildAutomaticFaceRig adds the missing channels as relative morph targets', () => {
+test('buildAutomaticFaceRig adds facial bones plus residual blendshapes', () => {
   const { root, head, mesh } = syntheticHead();
   const r = buildAutomaticFaceRig(root, head, [...FACE_CHANNELS], (o) => o.name);
   assert.ok(r, 'auto face rig built');
   assert.deepEqual(r.channels, [...FACE_CHANNELS]);
-  assert.equal(r.meshes[0].meshName, 'HeadMesh');
+  // 11 facial bones under the head, part of the mesh skeleton.
+  assert.equal(r.bones.length, 11);
+  for (const b of r.bones) {
+    assert.equal(b.parent, head);
+    assert.ok(mesh.skeleton.bones.includes(b), `${b.name} in skeleton`);
+    b.userData.bindPos = b.position.clone();
+    b.userData.bindQuat = b.quaternion.clone();
+  }
+  assert.deepEqual(
+    r.bones.map((b) => b.name).sort(),
+    [
+      'AutoFace_Brow_L', 'AutoFace_Brow_R', 'AutoFace_Cheek_L', 'AutoFace_Cheek_R', 'AutoFace_EyelidLower_L',
+      'AutoFace_EyelidLower_R', 'AutoFace_EyelidUpper_L', 'AutoFace_EyelidUpper_R', 'AutoFace_Jaw',
+      'AutoFace_MouthCorner_L', 'AutoFace_MouthCorner_R',
+    ],
+  );
   assert.equal(mesh.geometry.morphTargetsRelative, true);
-  assert.equal(mesh.morphTargetInfluences!.length, FACE_CHANNELS.length);
 
   const pts = worldPoints(mesh);
   const nearest = (x: number, y: number) => {
@@ -99,23 +145,30 @@ test('buildAutomaticFaceRig adds the missing channels as relative morph targets'
     }
     return best;
   };
+  // Rest shape unchanged by the new skin weights.
+  const after = worldPoints(mesh);
+  assert.ok(pts.every((p, i) => p.distanceTo(after[i]) < 1e-6));
+
   // Jaw: the chin goes down, the forehead does not move.
   const chin = nearest(0, 1.595);
   const forehead = nearest(0, 1.72);
-  assert.ok(morphDelta(mesh, 'mouthOpen', chin).y < -0.004, 'chin moves down on mouthOpen');
-  assert.ok(morphDelta(mesh, 'mouthOpen', forehead).length() < 1e-6, 'forehead stays');
+  assert.ok(channelDelta(root, mesh, r, 'mouthOpen', chin).y < -0.004, 'chin moves down on mouthOpen');
+  assert.ok(channelDelta(root, mesh, r, 'mouthOpen', forehead).length() < 1e-5, 'forehead stays');
   // Blink: only the eye on the same side (+X = character's left) closes.
   const lidL = nearest(FACE.eyeX, FACE.eyeY + 0.006);
   const lidR = nearest(-FACE.eyeX, FACE.eyeY + 0.006);
-  assert.ok(morphDelta(mesh, 'eyeBlinkLeft', lidL).y < -0.002, 'left upper lid moves down');
-  assert.ok(morphDelta(mesh, 'eyeBlinkLeft', lidR).length() < 1e-6, 'right lid untouched by left blink');
-  // Brows up, smile corners up and out.
+  assert.ok(channelDelta(root, mesh, r, 'eyeBlinkLeft', lidL).y < -0.002, 'left upper lid moves down');
+  assert.ok(channelDelta(root, mesh, r, 'eyeBlinkLeft', lidR).length() < 1e-5, 'right lid untouched by left blink');
+  // Brows up/down, smile corners up and out.
   const brow = nearest(FACE.eyeX, FACE.eyeY + 0.022);
-  assert.ok(morphDelta(mesh, 'browUp', brow).y > 0.002);
-  assert.ok(morphDelta(mesh, 'browDown', brow).y < -0.001);
+  assert.ok(channelDelta(root, mesh, r, 'browUp', brow).y > 0.002);
+  assert.ok(channelDelta(root, mesh, r, 'browDown', brow).y < -0.001);
   const cornerL = nearest(0.025, FACE.mouthY);
-  const smile = morphDelta(mesh, 'mouthSmile', cornerL);
+  const smile = channelDelta(root, mesh, r, 'mouthSmile', cornerL);
   assert.ok(smile.y > 0.001 && smile.x > 0.001, `smile ${smile.toArray()}`);
+  // Bone + residual morph reproduce the target field of the jaw at the chin within 1 mm.
+  const target = faceChannelDisplacement('mouthOpen', pts[chin], r.landmarks, new THREE.Vector3());
+  assert.ok(channelDelta(root, mesh, r, 'mouthOpen', chin).distanceTo(target) < 0.001);
 });
 
 test('channels already covered by the model are not generated', () => {
@@ -144,8 +197,15 @@ test('real Avaturn avatar.glb (no blendshapes, no face bones) gets a 9-channel a
     times: [0, 0.5], boneTracks: {}, morphTracks: { mouthOpen: [0, 1], eyeBlinkLeft: [0, 1], mouthSmile: [0, 0.5] },
     qaComparison: { group1VsGroup2Right: [], group1VsGroup2Left: [], frames: [] },
   };
+  assert.equal(loaded.autoFaceRig.bones.length, 11, 'facial bones added');
+  assert.ok(loaded.autoFaceRig.bones.every((b) => b.parent?.name === 'Head'));
   const clip = buildSignAnimationClip(payload, loaded.rigTarget);
   const names = clip.tracks.map((t) => t.name);
+  // Bones carry the main motion...
+  for (const t of ['AutoFace_Jaw.quaternion', 'AutoFace_EyelidUpper_L.quaternion', 'AutoFace_MouthCorner_L.position']) {
+    assert.ok(names.includes(t), `${t} (${names.join(', ')})`);
+  }
+  // ...and residual blendshapes the details.
   for (const m of ['mouthOpen', 'eyeBlinkLeft', 'mouthSmile']) {
     assert.ok(names.some((n) => n.endsWith(`.morphTargetInfluences[${m}]`)), `${m} track (${names.join(', ')})`);
   }

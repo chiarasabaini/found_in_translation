@@ -139,8 +139,13 @@ The avatar loader drives the 9 face channels (`mouthOpen`, `mouthSmile`, `mouthF
 3. **Automatic facial rig** (`src/three/autoFaceRig.ts`) for whatever is left. Models such as Avaturn exports have neither blendshapes nor face bones, only a `Head` bone. The loader then:
    - finds the face mesh among the meshes skinned to the head;
    - detects the landmarks from its geometry: nose tip, lip line (the shallow hollow between the lips, at about 1/3 from subnasale to chin), eye sockets (profile concavity), brows, face width;
-   - generates procedural blendshapes fitted to that face (jaw rotation around a hinge near the ears, lid closure, brow raise, mouth corners, lips, cheeks).
+   - defines a displacement field per channel fitted to that face (jaw rotation around a hinge near the ears, lid closure, brow raise, mouth corners, lips, cheeks);
+   - builds a **mixed rig**:
+     - **Facial bones**, children of `Head`, placed on the landmarks: `AutoFace_Jaw`, `AutoFace_EyelidUpper_L/R`, `AutoFace_EyelidLower_L/R`, `AutoFace_Brow_L/R`, `AutoFace_MouthCorner_L/R`, `AutoFace_Cheek_L/R`. The face vertices get skin weights toward them, fitted so that the bone motion reproduces each field. The bones carry the main motion and appear in the **Skeleton** view.
+     - **Residual blendshapes**: whatever the bones cannot reproduce, with the canonical channel names. Bones plus blendshapes give exactly the target shape.
 
-   Other head meshes (eyebrows, lashes, beard) follow only near the skin; hair strands do not. The viewport label shows `auto face rig (N channels)`.
+   Other head meshes (eyebrows, lashes, beard) follow only near the skin; hair strands do not. Each new avatar gets its own fit when it is loaded. The viewport label shows `auto face rig (N channels)`.
+
+The default (procedural) avatar uses the same mixed-rig engine, with its hand-made deformations as the target: 10 facial bones (no lower lids) plus residual blendshapes. Left/right follow the avatar's side, as in ARKit: `eyeBlinkLeft` closes the avatar's left eye (+X).
 
 Limits of level 3: meshes with closed lips have no mouth interior, so `mouthOpen` stretches the lips instead of showing teeth; painted eyes close by folding the lid texture. Test it on a real model with `LIS_AVATAR_GLB=/path/avatar.glb npx tsx --test src/three/autoFaceRig.test.ts`.

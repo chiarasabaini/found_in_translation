@@ -2178,6 +2178,14 @@ export function analyzeUniversalAvatarRig(
     }
     primaryFaceMeshName ??= autoFaceRig.meshes[0]?.meshName ?? null;
   }
+  // Facial bone tracks: the model's own facial bones plus the automatic ones.
+  const facialBoneTrackBuilders = [
+    ...(hasFacialBoneRig ? [buildFacialBoneTracks] : []),
+    ...(autoFaceRig?.bones.length ? [autoFaceRig.buildFacialBoneTracks] : []),
+  ];
+  const combinedFacialBoneTracks = facialBoneTrackBuilders.length
+    ? (morphTracks: Record<string, number[]>, times: number[]) => facialBoneTrackBuilders.flatMap((b) => b(morphTracks, times))
+    : undefined;
 
   // Filter visual deform bones for clean SkeletonHelper visualization (hiding Rigify VIS_/WGT-/MCH-/IK clutter)
   const visualBones: THREE.Bone[] = [];
@@ -2191,6 +2199,8 @@ export function analyzeUniversalAvatarRig(
       visualBones.push(c.obj as THREE.Bone);
     }
   }
+  // The automatic facial bones are part of the visible skeleton.
+  if (autoFaceRig) visualBones.push(...autoFaceRig.bones);
 
   return {
     rigTarget: {
@@ -2200,7 +2210,7 @@ export function analyzeUniversalAvatarRig(
       faceMeshName: primaryFaceMeshName,
       availableMorphs,
       morphTargetMeshes,
-      buildFacialBoneTracks: hasFacialBoneRig ? buildFacialBoneTracks : undefined,
+      buildFacialBoneTracks: combinedFacialBoneTracks,
     },
     detectedFormat,
     matchedBonesCount: Object.keys(boneNodeNames).length,
