@@ -470,9 +470,18 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
           api.skeletonHelper.visible = skeletonDebug;
           api.mixer = new THREE.AnimationMixer(loaded.root);
           api.activeAction = null;
-          setCustomAvatarInfo(
-            `${loaded.detectedFormat} · ${loaded.matchedBonesCount} bones · ${loaded.rigTarget.availableMorphs.size} morphs`,
-          );
+          const morphCount = loaded.rigTarget.availableMorphs.size;
+          const faceLabel =
+            morphCount > 0
+              ? `${morphCount} morphs`
+              : loaded.hasFacialBoneRig
+                ? 'face bone rig'
+                : '0 morphs';
+          const boneLabel =
+            loaded.drivenBonesCount > loaded.matchedBonesCount
+              ? `${loaded.matchedBonesCount} (${loaded.drivenBonesCount} driven) bones`
+              : `${loaded.matchedBonesCount} bones`;
+          setCustomAvatarInfo(`${loaded.detectedFormat} · ${boneLabel} · ${faceLabel}`);
           if (animation) api.applyClip(animation, false);
           else api.requestRender();
         } catch (err) {

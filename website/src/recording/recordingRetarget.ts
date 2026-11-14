@@ -309,23 +309,83 @@ interface BodyAxisSigns {
   z: number;
 }
 
+interface BodyTorsoSeries {
+  leftShoulder: Vec3[] | null;
+  rightShoulder: Vec3[] | null;
+  centralTop: Vec3[] | null;
+  lowerJoint: Vec3[] | null;
+}
+
+const LOWER_TORSO_KEYS = [
+  'torso',
+  'hips',
+  'pelvis',
+  'mid_hip',
+  'hip',
+  'waist',
+  'spine',
+  'lower_spine',
+  'spine_base',
+  'chest',
+  'root',
+] as const;
+
+/**
+ * Resolves upper-body and 3-bone torso landmarks (1 central + 2 lateral joined at a lower torso
+ * joint, or MediaPipe left_hip/right_hip midpoint) from body.csv across common naming conventions.
+ */
+function resolveBodyTorsoSeries(body: RokokoRecording['body']): BodyTorsoSeries {
+  if (!body) {
+    return { leftShoulder: null, rightShoulder: null, centralTop: null, lowerJoint: null };
+  }
+  const pts = body.points;
+  const leftShoulder = pts.left_shoulder ?? pts.shoulder_l ?? pts.LeftShoulder ?? null;
+  const rightShoulder = pts.right_shoulder ?? pts.shoulder_r ?? pts.RightShoulder ?? null;
+  const centralTop = pts.neck ?? pts.cervical ?? pts.upper_spine ?? pts.head_base ?? pts.Neck ?? null;
+
+  let lowerJoint: Vec3[] | null = null;
+  for (const key of LOWER_TORSO_KEYS) {
+    if (pts[key] && pts[key].length > 0) {
+      lowerJoint = pts[key];
+      break;
+    }
+  }
+  if (!lowerJoint) {
+    const lh = pts.left_hip ?? pts.hip_l ?? pts.LeftUpLeg;
+    const rh = pts.right_hip ?? pts.hip_r ?? pts.RightUpLeg;
+    if (lh && rh && lh.length > 0 && lh.length === rh.length) {
+      lowerJoint = lh.map((p, i) => vScale(vAdd(p, rh[i]), 0.5));
+    }
+  }
+
+  return { leftShoulder, rightShoulder, centralTop, lowerJoint };
+}
+
 /** Detects axis signs of body.csv so that left shoulder = +X, up = +Y, forward = +Z. */
 function detectBodyAxes(rec: RokokoRecording): BodyAxisSigns {
   const b = rec.body;
   const signs: BodyAxisSigns = { x: -1, y: 1, z: 1 };
   if (!b) return signs;
-  const ls = b.points.left_shoulder;
-  const rs = b.points.right_shoulder;
+  const torsoSeries = resolveBodyTorsoSeries(b);
+  const ls = torsoSeries.leftShoulder;
+  const rs = torsoSeries.rightShoulder;
   const le = b.points.left_elbow;
   const re = b.points.right_elbow;
   if (ls && rs && ls.length) {
     const dx = median(ls.map((p, i) => p[0] - rs[i][0]));
     if (Math.abs(dx) > 1e-4) signs.x = dx > 0 ? 1 : -1;
   }
-  if (ls && le && ls.length) {
+  if (ls && rs && torsoSeries.lowerJoint && torsoSeries.lowerJoint.length === ls.length) {
+    const dyLow = median(
+      torsoSeries.lowerJoint.map((low, i) => low[1] - 0.5 * (ls[i][1] + rs[i][1])),
+    );
+    if (Math.abs(dyLow) > 1e-4) signs.y = dyLow < 0 ? 1 : -1;
+  } else if (ls && le && ls.length) {
     // Elbows sit below the shoulders most of the time.
-    const dy = median(le.map((p, i) => p[1] - ls[i][1]).concat(re ? re.map((p, i) => p[1] - rs[i][1]) : []));
+    const dy = median(le.map((p, i) => p[1] - ls[i][1]).concat(re && rs ? re.map((p, i) => p[1] - rs[i][1]) : []));
     if (Math.abs(dy) > 1e-4) signs.y = dy < 0 ? 1 : -1;
+  }
+  if (ls && le && ls.length) {
     // Raising an elbow for signing moves it forward: correlate height with depth.
     const pairs: Array<[number, number]> = [];
     for (const [sh, el] of [
@@ -515,13 +575,72 @@ export function retargetRecording(rec: RokokoRecording, opts: RecordingRetargetO
   const body = opts.useBodyArms || opts.useTorso ? rec.body : null;
   const face = rec.face;
 
-  // Neutral references (median over the whole recording) for torso and head.
+  const torsoSeries = resolveBodyTorsoSeries(body);
+  const medVec3 = (arr: Vec3[], fallback: Vec3): Vec3 => [
+    median(arr.map((p) => p[0])),
+    median(arr.map((p) => p[1])),
+    median(arr.map((p) => p[2])),
+  ].some((x) => !Number.isFinite(x))
+    ? fallback
+    : [median(arr.map((p) => p[0])), median(arr.map((p) => p[1])), median(arr.map((p) => p[2]))];
+
+  // Neutral references (median over the whole recording) for torso (3-bone or shoulder-line) and head.
   let neutralShoulderDir: Vec3 | null = null;
-  if (body?.points.left_shoulder && body.points.right_shoulder) {
-    const dirs = body.points.left_shoulder.map((p, i) =>
-      vNorm(vSub(mapBody(p, bodyAxes), mapBody(body.points.right_shoulder[i], bodyAxes)), [1, 0, 0]),
-    );
-    neutralShoulderDir = vNorm([median(dirs.map((d) => d[0])), median(dirs.map((d) => d[1])), median(dirs.map((d) => d[2]))], [1, 0, 0]);
+  let hasThreeBoneTorso = false;
+  let torsoPivotMode: 'lower' | 'centralBelow' | 'centralAbove' | 'none' = 'none';
+  let neutralTorsoFrame: [Vec3, Vec3, Vec3] | null = null;
+  const neutralLateralDir: Partial<Record<HandSide, Vec3>> = {};
+
+  if (torsoSeries.leftShoulder && torsoSeries.rightShoulder && torsoSeries.leftShoulder.length > 0) {
+    const lsArr = torsoSeries.leftShoulder.map((p) => mapBody(p, bodyAxes));
+    const rsArr = torsoSeries.rightShoulder.map((p) => mapBody(p, bodyAxes));
+    const dirs = lsArr.map((l, i) => vNorm(vSub(l, rsArr[i]), [1, 0, 0]));
+    neutralShoulderDir = vNorm(medVec3(dirs, [1, 0, 0]), [1, 0, 0]);
+
+    if (torsoSeries.lowerJoint && torsoSeries.lowerJoint.length === lsArr.length) {
+      const lowArr = torsoSeries.lowerJoint.map((p) => mapBody(p, bodyAxes));
+      const verticalSpans = lsArr.map((l, i) => 0.5 * (l[1] + rsArr[i][1]) - lowArr[i][1]);
+      if (median(verticalSpans) > 0.04) {
+        hasThreeBoneTorso = true;
+        torsoPivotMode = 'lower';
+        const topArr =
+          torsoSeries.centralTop && torsoSeries.centralTop.length === lsArr.length
+            ? torsoSeries.centralTop.map((p) => mapBody(p, bodyAxes))
+            : lsArr.map((l, i) => vScale(vAdd(l, rsArr[i]), 0.5));
+
+        const upVecs: Vec3[] = [];
+        const leftLatVecs: Vec3[] = [];
+        const rightLatVecs: Vec3[] = [];
+        for (let i = 0; i < lsArr.length; i++) {
+          const bCentral = vNorm(vSub(topArr[i], lowArr[i]), [0, 1, 0]);
+          const bLeft = vSub(lsArr[i], lowArr[i]);
+          const bRight = vSub(rsArr[i], lowArr[i]);
+          const bLatSym = vNorm(vAdd(bLeft, bRight), [0, 1, 0]);
+          upVecs.push(vNorm(vAdd(vScale(bCentral, 0.65), vScale(bLatSym, 0.35)), [0, 1, 0]));
+          leftLatVecs.push(vNorm(bLeft, [0.4, 0.9, 0]));
+          rightLatVecs.push(vNorm(bRight, [-0.4, 0.9, 0]));
+        }
+        const neutralUp = vNorm(medVec3(upVecs, [0, 1, 0]), [0, 1, 0]);
+        neutralTorsoFrame = orthoFrame(neutralUp, neutralShoulderDir);
+        neutralLateralDir.left = vNorm(medVec3(leftLatVecs, [0.4, 0.9, 0]), [0.4, 0.9, 0]);
+        neutralLateralDir.right = vNorm(medVec3(rightLatVecs, [-0.4, 0.9, 0]), [-0.4, 0.9, 0]);
+      }
+    } else if (torsoSeries.centralTop && torsoSeries.centralTop.length === lsArr.length) {
+      const topArr = torsoSeries.centralTop.map((p) => mapBody(p, bodyAxes));
+      const neckOffsets = lsArr.map((l, i) => topArr[i][1] - 0.5 * (l[1] + rsArr[i][1]));
+      const medOffset = median(neckOffsets);
+      if (Math.abs(medOffset) > 0.04) {
+        torsoPivotMode = medOffset > 0 ? 'centralAbove' : 'centralBelow';
+        const upVecs = lsArr.map((l, i) => {
+          const mid = vScale(vAdd(l, rsArr[i]), 0.5);
+          return medOffset > 0
+            ? vNorm(vSub(topArr[i], mid), [0, 1, 0])
+            : vNorm(vSub(mid, topArr[i]), [0, 1, 0]);
+        });
+        const neutralUp = vNorm(medVec3(upVecs, [0, 1, 0]), [0, 1, 0]);
+        neutralTorsoFrame = orthoFrame(neutralUp, neutralShoulderDir);
+      }
+    }
   }
   let neutralHeadQ: Quat | null = null;
   const faceOk = !!face && face.landmarks.leftEye.length > 0 && face.landmarks.chin.length > 0;
@@ -546,6 +665,7 @@ export function retargetRecording(rec: RokokoRecording, opts: RecordingRetargetO
   // Raw per-frame world-space quantities (before smoothing).
   const raw = {
     torso: [] as Quat[],
+    clavicle: { right: [] as Vec3[], left: [] as Vec3[] },
     head: [] as Quat[],
     upper: { right: [] as Vec3[], left: [] as Vec3[] },
     fore: { right: [] as Vec3[], left: [] as Vec3[] },
@@ -567,8 +687,10 @@ export function retargetRecording(rec: RokokoRecording, opts: RecordingRetargetO
   for (let k = 0; k < nFrames; k++) {
     const t = start + times[k];
 
-    // --- torso from shoulder line ---------------------------------------
+    // --- 3-bone torso (1 central + 2 lateral from lower joint) or shoulder line ---
     let torso: Quat = IDENTITY;
+    let latLeft: Vec3 = neutralLateralDir.left ?? [0.4, 0.9, 0];
+    let latRight: Vec3 = neutralLateralDir.right ?? [-0.4, 0.9, 0];
     let bodyI = 0;
     let bodyF = 0;
     if (body) {
@@ -578,13 +700,44 @@ export function retargetRecording(rec: RokokoRecording, opts: RecordingRetargetO
         bodyF = 0;
       }
     }
-    if (opts.useTorso && body && neutralShoulderDir && body.points.left_shoulder) {
-      const l = mapBody(sampleVec(body.points.left_shoulder, bodyI, bodyF), bodyAxes);
-      const r = mapBody(sampleVec(body.points.right_shoulder, bodyI, bodyF), bodyAxes);
-      const dir = vNorm(vSub(l, r), [1, 0, 0]);
-      torso = qClampAngle(qFromUnitVectors(neutralShoulderDir, dir), degToRad(25));
+    if (opts.useTorso && body && neutralShoulderDir && torsoSeries.leftShoulder && torsoSeries.rightShoulder) {
+      const l = mapBody(sampleVec(torsoSeries.leftShoulder, bodyI, bodyF), bodyAxes);
+      const r = mapBody(sampleVec(torsoSeries.rightShoulder, bodyI, bodyF), bodyAxes);
+      const sideDir = vNorm(vSub(l, r), [1, 0, 0]);
+      if (torsoPivotMode === 'lower' && hasThreeBoneTorso && neutralTorsoFrame && torsoSeries.lowerJoint) {
+        const low = mapBody(sampleVec(torsoSeries.lowerJoint, bodyI, bodyF), bodyAxes);
+        const top = torsoSeries.centralTop
+          ? mapBody(sampleVec(torsoSeries.centralTop, bodyI, bodyF), bodyAxes)
+          : vScale(vAdd(l, r), 0.5);
+        const bCentral = vNorm(vSub(top, low), [0, 1, 0]);
+        const bLeft = vSub(l, low);
+        const bRight = vSub(r, low);
+        const bLatSym = vNorm(vAdd(bLeft, bRight), [0, 1, 0]);
+        const upDir = vNorm(vAdd(vScale(bCentral, 0.65), vScale(bLatSym, 0.35)), [0, 1, 0]);
+        const curTorsoFrame = orthoFrame(upDir, sideDir);
+        torso = qClampAngle(qFrameToFrame(neutralTorsoFrame, curTorsoFrame), degToRad(28));
+        latLeft = vNorm(bLeft, latLeft);
+        latRight = vNorm(bRight, latRight);
+      } else if (
+        (torsoPivotMode === 'centralAbove' || torsoPivotMode === 'centralBelow') &&
+        neutralTorsoFrame &&
+        torsoSeries.centralTop
+      ) {
+        const top = mapBody(sampleVec(torsoSeries.centralTop, bodyI, bodyF), bodyAxes);
+        const mid = vScale(vAdd(l, r), 0.5);
+        const upDir =
+          torsoPivotMode === 'centralAbove'
+            ? vNorm(vSub(top, mid), [0, 1, 0])
+            : vNorm(vSub(mid, top), [0, 1, 0]);
+        const curTorsoFrame = orthoFrame(upDir, sideDir);
+        torso = qClampAngle(qFrameToFrame(neutralTorsoFrame, curTorsoFrame), degToRad(28));
+      } else {
+        torso = qClampAngle(qFromUnitVectors(neutralShoulderDir, sideDir), degToRad(25));
+      }
     }
     raw.torso.push(torso);
+    raw.clavicle.left.push(latLeft);
+    raw.clavicle.right.push(latRight);
 
     // --- head from face landmarks ------------------------------------------
     let head: Quat = IDENTITY;
@@ -657,8 +810,8 @@ export function retargetRecording(rec: RokokoRecording, opts: RecordingRetargetO
       if (opts.useBodyArms && body) {
         const shoulderKey = `${side}_shoulder`;
         const elbowKey = `${side}_elbow`;
-        const sh = body.points[shoulderKey];
-        const el = body.points[elbowKey];
+        const sh = body.points[shoulderKey] ?? (side === 'left' ? torsoSeries.leftShoulder : torsoSeries.rightShoulder);
+        const el = body.points[elbowKey] ?? body.points[side === 'left' ? 'elbow_l' : 'elbow_r'];
         if (sh && el) {
           const dir = vNorm(vSub(mapBody(sampleVec(el, bodyI, bodyF), bodyAxes), mapBody(sampleVec(sh, bodyI, bodyF), bodyAxes)));
           const vis = Math.min(sampleNum(body.visibility[elbowKey] ?? [], bodyI, bodyF) || 1, sampleNum(body.visibility[shoulderKey] ?? [], bodyI, bodyF) || 1);
@@ -697,6 +850,9 @@ export function retargetRecording(rec: RokokoRecording, opts: RecordingRetargetO
     raw.torso = smoothQuatTrack(raw.torso, fps, minCutoff * 0.6, beta);
     raw.head = smoothQuatTrack(raw.head, fps, minCutoff, beta);
     for (const side of ['right', 'left'] as const) {
+      if (hasThreeBoneTorso) {
+        raw.clavicle[side] = smoothVecTrack(raw.clavicle[side], fps, minCutoff * 0.6, beta);
+      }
       // Camera elbows jitter more than the gloves: filter them harder.
       raw.upper[side] = smoothVecTrack(raw.upper[side], fps, minCutoff * 0.6, beta);
       raw.fore[side] = smoothVecTrack(raw.fore[side], fps, minCutoff, beta);
@@ -738,8 +894,21 @@ export function retargetRecording(rec: RokokoRecording, opts: RecordingRetargetO
 
     const qaHands: Partial<Record<HandSide, QaHandFrame>> = {};
     for (const side of ['right', 'left'] as const) {
-      const shoulderWorld = chestWorld;
-      push(`${side}Shoulder`, IDENTITY);
+      let shoulderLocal: Quat = IDENTITY;
+      const neutralLat = neutralLateralDir[side];
+      if (opts.useTorso && hasThreeBoneTorso && neutralLat) {
+        const expectedLatWorld = qRotate(chestWorld, neutralLat);
+        const actualLatWorld = raw.clavicle[side][k];
+        const chestInv = qConj(chestWorld);
+        const rawClav = qFromUnitVectors(
+          qRotate(chestInv, expectedLatWorld),
+          qRotate(chestInv, actualLatWorld),
+        );
+        shoulderLocal = qClampAngle(rawClav, degToRad(14));
+      }
+      blend(`${side}Shoulder`, shoulderLocal);
+      const shoulderLocalFaded = tracks[`${side}Shoulder`][k];
+      const shoulderWorld = qMul(chestWorld, shoulderLocalFaded);
 
       const upperLocal = swingTo(shoulderWorld, raw.upper[side][k]);
       const upperWorld = qMul(shoulderWorld, upperLocal);
