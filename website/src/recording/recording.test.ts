@@ -165,7 +165,95 @@ test('raised forearms are detected as a signing segment', () => {
   assert.ok(Math.abs(estimateGloveYawDeg(rec)) < 5);
 });
 
-const realDir = process.env.LIS_RECORDING_DIR;
+test('3-bone torso (1 central + 2 lateral from lower joint) recovers pitch, yaw, roll, and shrug', () => {
+  const frames = 30;
+  const header = [
+    'frame',
+    'timestamp_ms',
+    'body_detected',
+    'torso_x',
+    'torso_y',
+    'torso_z',
+    'torso_vis',
+    'neck_x',
+    'neck_y',
+    'neck_z',
+    'neck_vis',
+    'left_shoulder_x',
+    'left_shoulder_y',
+    'left_shoulder_z',
+    'left_shoulder_vis',
+    'right_shoulder_x',
+    'right_shoulder_y',
+    'right_shoulder_z',
+    'right_shoulder_vis',
+    'left_elbow_x',
+    'left_elbow_y',
+    'left_elbow_z',
+    'left_elbow_vis',
+    'right_elbow_x',
+    'right_elbow_y',
+    'right_elbow_z',
+    'right_elbow_vis',
+  ];
+  const bodyLines = [header.join(',')];
+  for (let k = 0; k < frames; k++) {
+    // First 20 frames neutral (so median reference is upright); last 10 frames lean forward (+Z) and shrug left shoulder up
+    const leanZ = k >= 20 ? 0.1 : 0;
+    const shrugLeftY = k >= 20 ? 0.05 : 0;
+    const row = [
+      k + 1,
+      1000 + k * 33,
+      1,
+      // lower joint (`torso` at y = -0.35)
+      0, -0.35, 0, 1,
+      // central top (`neck` at y = 0.05, leans forward +Z in last 10 frames)
+      0, 0.05, leanZ, 1,
+      // camera coords: left_shoulder is -X, right_shoulder is +X
+      -0.19, shrugLeftY, leanZ, 1,
+      0.19, 0, leanZ, 1,
+      -0.25, -0.28, leanZ + 0.05, 1,
+      0.25, -0.28, leanZ + 0.05, 1,
+    ];
+    bodyLines.push(row.join(','));
+  }
+
+  const files: RecordingFileInput[] = [
+    { name: 'left_hand.csv', text: syntheticHandCsv('Left', frames, () => 0, () => [0, -1, 0]) },
+    { name: 'right_hand.csv', text: syntheticHandCsv('Right', frames, () => 0, () => [0, -1, 0]) },
+    { name: 'body.csv', text: bodyLines.join('\n') },
+  ];
+  const rec = parseRokokoRecording(files, 'three_bone_torso');
+  const { payload } = retargetRecording(rec, {
+    ...DEFAULT_RETARGET_OPTIONS,
+    gloveYawDeg: 0,
+    smoothing: 0,
+    fadeSec: 0,
+    startSec: 0,
+    endSec: rec.durationSec,
+    classId: 'torso_test',
+    phrase: 'Torso Test',
+    category: 'Test',
+    description: '',
+  });
+
+  const last = payload.times.length - 1;
+  const qSpineRest = boneQuat(payload, 'spine', 2);
+  const qSpineLean = boneQuat(payload, 'spine', last);
+  const qChestLean = boneQuat(payload, 'chest', last);
+  const qTorsoLean = qMul(qSpineLean, qChestLean);
+  assert.ok(radToDeg(qAngle(qSpineRest)) < 1.5, 'neutral frame stays near identity');
+  // Leaning forward rotates +Y toward +Z (positive X quaternion component)
+  const upAfterLean = qRotate(qTorsoLean, [0, 1, 0]);
+  assert.ok(upAfterLean[2] > 0.12, `expected forward pitch (+Z), got up=${upAfterLean.map((v) => v.toFixed(3))}`);
+
+  // Left shoulder shrugged higher than right shoulder -> non-trivial leftShoulder clavicle rotation
+  const qLeftShoulder = boneQuat(payload, 'leftShoulder', last);
+  assert.ok(radToDeg(qAngle(qLeftShoulder)) > 1.0, 'asymmetric shrug drives clavicle bone');
+});
+
+const defaultSampleDir = '/home/davide/Documenti/Junction2026/data_sample_test/test_1_20261114_162048';
+const realDir = process.env.LIS_RECORDING_DIR ?? (existsSync(defaultSampleDir) ? defaultSampleDir : undefined);
 test('real recording imports and retargets', { skip: !realDir || !existsSync(realDir) }, () => {
   const dir = realDir as string;
   const files = readdirSync(dir)

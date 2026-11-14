@@ -472,9 +472,18 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
           api.skeletonHelper.visible = skeletonDebug;
           api.mixer = new THREE.AnimationMixer(loaded.root);
           api.activeAction = null;
-          setCustomAvatarInfo(
-            `${loaded.detectedFormat} · ${loaded.matchedBonesCount} bones · ${loaded.rigTarget.availableMorphs.size} morphs`,
-          );
+          const autoChannels = loaded.autoFaceRig?.channels.length ?? 0;
+          const authoredMorphs = loaded.rigTarget.availableMorphs.size - autoChannels;
+          const faceParts: string[] = [];
+          if (authoredMorphs > 0) faceParts.push(`${authoredMorphs} morphs`);
+          if (loaded.hasFacialBoneRig) faceParts.push('face bone rig');
+          if (autoChannels > 0) faceParts.push(`auto face rig (${autoChannels} channels)`);
+          const faceLabel = faceParts.length ? faceParts.join(' + ') : 'no face rig';
+          const boneLabel =
+            loaded.drivenBonesCount > loaded.matchedBonesCount
+              ? `${loaded.matchedBonesCount} (${loaded.drivenBonesCount} driven) bones`
+              : `${loaded.matchedBonesCount} bones`;
+          setCustomAvatarInfo(`${loaded.detectedFormat} · ${boneLabel} · ${faceLabel}`);
           if (animation) api.applyClip(animation, false);
           else api.requestRender();
         } catch (err) {
@@ -574,7 +583,7 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
           <div className="text-xs text-slate-500">
             {customAvatarFile
               ? `${customAvatarFile.name}${customAvatarInfo ? ` · ${customAvatarInfo}` : ''}`
-              : 'Humanoid avatar · 54 bones + face morphs'}
+              : 'Humanoid avatar · 54 body bones + 10 facial bones + blendshapes'}
           </div>
           <div className="text-sm font-display font-semibold text-slate-900">
             {animation ? animation.phrase : 'Waiting for a phrase'}

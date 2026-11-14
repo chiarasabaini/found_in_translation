@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { AvatarRigTarget } from '../utils/clipBuilder';
+import { applyMixedFaceRig, type FaceBoneDef, type HeadVertex } from './autoFaceRig';
 
 export interface ProceduralAvatarHandle {
   root: THREE.Group;
@@ -133,8 +134,9 @@ export function createProceduralLisAvatar(): ProceduralAvatarHandle {
   addPart(chest, new THREE.TorusGeometry(0.072, 0.016, 12, 28), collarMat, [0, 0.245, 0.01], [Math.PI / 2, 0, 0]);
   addPart(neck, new THREE.CylinderGeometry(0.048, 0.055, 0.13, 16), skinMat, [0, 0.055, 0]);
 
-  // Sculpted Face Mesh with genuine morphTargetInfluences on head bone
-  const faceMesh = createMorphableHeadMesh(skinMat, geometries);
+  // Sculpted face mesh, skinned to the head; its facial rig is built once the skeleton exists.
+  const { mesh: faceMesh, roles: faceRoles, materials: faceMaterials } = createMorphableHeadMesh(skinMat, geometries);
+  materials.push(...faceMaterials);
   head.add(faceMesh);
 
   // Hair cap tilted back cleanly above the forehead/eyebrows + ears & eyes
@@ -236,6 +238,37 @@ export function createProceduralLisAvatar(): ProceduralAvatarHandle {
   skinnedAnchor.bind(skeleton);
   root.add(skinnedAnchor);
 
+  // Mixed facial rig, same engine as imported avatars: facial bones for the main motion,
+  // residual blendshapes for the rest. The hand-made deformations below are the target.
+  root.updateMatrixWorld(true);
+  faceMesh.bind(new THREE.Skeleton([head]));
+  const facePos = faceMesh.geometry.attributes.position;
+  const headQuat = head.getWorldQuaternion(new THREE.Quaternion());
+  const faceVerts: HeadVertex[] = Array.from({ length: facePos.count }, (_, i) => ({
+    mesh: faceMesh,
+    index: i,
+    weight: 1,
+    world: new THREE.Vector3().fromBufferAttribute(facePos, i).applyMatrix4(faceMesh.matrixWorld),
+  }));
+  const faceRig = applyMixedFaceRig({
+    root,
+    headNode: head,
+    channels: MORPH_NAMES,
+    boneDefs: proceduralFaceBoneDefs(head),
+    meshes: [{ mesh: faceMesh, verts: faceVerts, follow: () => 1 }],
+    target: (ch, v, out) => {
+      const [dx, dy, dz] = computeMorphDelta(
+        ch,
+        faceRoles[v.index],
+        facePos.getX(v.index),
+        facePos.getY(v.index),
+        facePos.getZ(v.index),
+      );
+      return out.set(dx, dy, dz).applyQuaternion(headQuat);
+    },
+    trackKeyOf: (o) => o.name,
+  });
+
   const skeletonHelper = new THREE.SkeletonHelper(hips);
   skeletonHelper.visible = false;
   root.add(skeletonHelper);
@@ -243,7 +276,8 @@ export function createProceduralLisAvatar(): ProceduralAvatarHandle {
   const rigTarget: AvatarRigTarget = {
     boneNodeNames,
     faceMeshName: faceMesh.name,
-    availableMorphs: new Set<string>(MORPH_NAMES),
+    availableMorphs: new Set<string>(faceRig?.meshes.flatMap((m) => m.morphs) ?? []),
+    buildFacialBoneTracks: faceRig?.buildFacialBoneTracks,
   };
 
   return {
@@ -259,19 +293,81 @@ export function createProceduralLisAvatar(): ProceduralAvatarHandle {
   };
 }
 
+/**
+ * Facial bones of the procedural head, placed on its features (head-bone local coordinates of
+ * the face mesh). Translations match the hand-made deformations, so the bones carry most of them.
+ */
+function proceduralFaceBoneDefs(head: THREE.Bone): FaceBoneDef[] {
+  const w = (x: number, y: number, z: number) => head.localToWorld(new THREE.Vector3(x, y, z));
+  const headQuat = head.getWorldQuaternion(new THREE.Quaternion());
+  const d = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyQuaternion(headQuat);
+  const X = d(1, 0, 0);
+  const defs: FaceBoneDef[] = [
+    {
+      name: 'AutoFace_Jaw',
+      pivot: w(0, 0.06, -0.01),
+      motions: { mouthOpen: { kind: 'rotate', axis: X, angle: 0.22 } },
+      primary: 'mouthOpen',
+    },
+  ];
+  for (const [side, suffix, blink] of [
+    [1, 'L', 'eyeBlinkLeft'],
+    [-1, 'R', 'eyeBlinkRight'],
+  ] as const) {
+    // Bone suffixes follow the avatar's side (+X = its left), like the GLB auto rig.
+    const x = side * 0.036;
+    defs.push(
+      {
+        name: `AutoFace_EyelidUpper_${suffix}`,
+        pivot: w(x, 0.119, 0.096),
+        motions: { [blink]: { kind: 'translate', delta: d(0, -0.024, 0.004) } },
+        primary: blink,
+      },
+      {
+        name: `AutoFace_Brow_${suffix}`,
+        pivot: w(x, 0.132, 0.095),
+        motions: {
+          browUp: { kind: 'translate', delta: d(0, 0.014, 0.002) },
+          browDown: { kind: 'translate', delta: d(-side * 0.004, -0.012, 0.002) },
+        },
+        primary: 'browUp',
+      },
+      {
+        name: `AutoFace_MouthCorner_${suffix}`,
+        pivot: w(side * 0.022, 0.033, 0.096),
+        motions: {
+          mouthSmile: { kind: 'translate', delta: d(side * 0.0035, 0.011, -0.003) },
+          mouthFrown: { kind: 'translate', delta: d(-side * 0.0018, -0.011, 0) },
+          mouthPucker: { kind: 'translate', delta: d(-side * 0.0077, 0, 0.014) },
+        },
+        primary: 'mouthSmile',
+      },
+      {
+        name: `AutoFace_Cheek_${suffix}`,
+        pivot: w(side * 0.05, 0.055, 0.07),
+        motions: { cheekPuff: { kind: 'translate', delta: d(side * 0.016, 0, 0.01) } },
+        primary: 'cheekPuff',
+      },
+    );
+  }
+  return defs;
+}
+
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+type FaceRole = 'head' | 'browL' | 'browR' | 'lidL' | 'lidR' | 'upperLip' | 'lowerLip' | 'mouthCav';
+
 /**
- * Creates a sculpted head + facial landmarks mesh whose vertices carry 9 morph targets
- * (mouthOpen, mouthSmile, mouthPucker, mouthFrown, browUp, browDown, eyeBlinkLeft/Right, cheekPuff)
- * using vertex colors so brows, lips, eyelids, and skin share one morphable BufferGeometry.
+ * Creates a sculpted head + facial landmarks mesh (head, brows, lids, lips, mouth cavity) as one
+ * vertex-colored BufferGeometry, skinned to the head. `roles` tells which part each vertex
+ * belongs to; the facial rig uses it to fit bones and residual blendshapes.
  */
 function createMorphableHeadMesh(
   _baseSkinMat: THREE.Material,
   geometries: THREE.BufferGeometry[],
-): THREE.Mesh {
+): { mesh: THREE.SkinnedMesh; roles: FaceRole[]; materials: THREE.Material[] } {
   const parts: Array<{
     geo: THREE.BufferGeometry;
     role: 'head' | 'browL' | 'browR' | 'lidL' | 'lidR' | 'upperLip' | 'lowerLip' | 'mouthCav';
@@ -355,27 +451,11 @@ function createMorphableHeadMesh(
   mergedGeo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
   mergedGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-  // Build morph target position buffers (delta relative to base position in Three.js morphTargetsRelative = true)
-  const morphPosAttrs: THREE.BufferAttribute[] = [];
-  for (const morphName of MORPH_NAMES) {
-    const targetArr = new Float32Array(positions);
-    for (let v = 0; v < totalVerts; v++) {
-      const idx3 = v * 3;
-      const x = positions[idx3];
-      const y = positions[idx3 + 1];
-      const z = positions[idx3 + 2];
-      const role = roles[v];
-
-      const [dx, dy, dz] = computeMorphDelta(morphName, role, x, y, z);
-      targetArr[idx3] = x + dx;
-      targetArr[idx3 + 1] = y + dy;
-      targetArr[idx3 + 2] = z + dz;
-    }
-    const attr = new THREE.BufferAttribute(targetArr, 3);
-    attr.name = morphName;
-    morphPosAttrs.push(attr);
-  }
-  mergedGeo.morphAttributes.position = morphPosAttrs;
+  // Skinned to the head (index 0 of the face skeleton); the facial rig adds its bones later.
+  mergedGeo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(new Uint16Array(totalVerts * 4), 4));
+  const weights = new Float32Array(totalVerts * 4);
+  for (let v = 0; v < totalVerts; v++) weights[v * 4] = 1;
+  mergedGeo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(weights, 4));
   geometries.push(mergedGeo);
 
   const faceMat = new THREE.MeshStandardMaterial({
@@ -384,12 +464,13 @@ function createMorphableHeadMesh(
     metalness: 0.02,
   });
 
-  const mesh = new THREE.Mesh(mergedGeo, faceMat);
+  const mesh = new THREE.SkinnedMesh(mergedGeo, faceMat);
   mesh.name = 'AvatarFaceMesh';
   mesh.castShadow = true;
   mesh.receiveShadow = true;
-  mesh.updateMorphTargets();
-  return mesh;
+  // Skinned vertices move outside the static bounds when the jaw opens.
+  mesh.frustumCulled = false;
+  return { mesh, roles, materials: [faceMat] };
 }
 
 function computeMorphDelta(
@@ -426,9 +507,10 @@ function computeMorphDelta(
       const inner = Math.max(0, 1 - Math.abs(Math.abs(x) - 0.02) / 0.03);
       return [x > 0 ? -0.004 : 0.004, -0.010 - 0.004 * inner, 0.002];
     }
-  } else if (morph === 'eyeBlinkLeft' && role === 'lidL') {
+  } else if (morph === 'eyeBlinkLeft' && role === 'lidR') {
+    // Part names follow the viewer's side: lidR sits at +X, the avatar's LEFT eye (ARKit eyeBlinkLeft).
     if (y < 0.117) return [0, -0.024, 0.004];
-  } else if (morph === 'eyeBlinkRight' && role === 'lidR') {
+  } else if (morph === 'eyeBlinkRight' && role === 'lidL') {
     if (y < 0.117) return [0, -0.024, 0.004];
   } else if (morph === 'cheekPuff' && role === 'head') {
     if (y > 0.02 && y < 0.09 && z > 0.03 && Math.abs(x) > 0.035) {
