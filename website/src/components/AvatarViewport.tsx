@@ -13,7 +13,8 @@ import {
 } from 'lucide-react';
 import type { SignAnimationPayload } from '../types/lis';
 import { createProceduralLisAvatar, type ProceduralAvatarHandle } from '../three/proceduralAvatar';
-import { loadVrmOrGlbFromFile, type LoadedVrmAvatar } from '../three/vrmAdapter';
+// The VRM/GLB loader (GLTFLoader + three-vrm) loads on demand, when the user picks a file.
+import type { LoadedVrmAvatar } from '../three/vrmAdapter';
 import { buildSignAnimationClip, type AvatarRigTarget } from '../utils/clipBuilder';
 
 type CameraPreset = 'front' | 'hands' | 'face';
@@ -456,6 +457,7 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
       if (customAvatarFile) {
         try {
           onCustomAvatarError(null);
+          const { loadVrmOrGlbFromFile } = await import('../three/vrmAdapter');
           const loaded = await loadVrmOrGlbFromFile(customAvatarFile);
           if (cancelled) {
             loaded.dispose();

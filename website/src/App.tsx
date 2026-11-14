@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   DictionaryClass,
   DictionaryPayload,
@@ -10,10 +10,6 @@ import { matchPhrase } from './utils/matcher';
 import { TopBar, type AppViewMode } from './components/TopBar';
 import { PhraseInputPanel } from './components/PhraseInputPanel';
 import { AvatarViewport } from './components/AvatarViewport';
-import { QaComparisonView } from './components/QaComparisonView';
-import { DictionaryView } from './components/DictionaryView';
-import { ArchitectureView } from './components/ArchitectureView';
-import { RecordingStudioView } from './components/RecordingStudioView';
 import { deleteRecordedClip, downloadText, loadRecordedClips, saveRecordedClip } from './recording/clipStore';
 import { getSignLanguage, localizeClass, useLanguageSettings } from './i18n/languages';
 import type { GenerationResult, InterpreterMode } from './components/PhraseInputPanel';
@@ -21,6 +17,18 @@ import { configuredModelUrl, HttpMotionModel, type MotionGenerator } from './gen
 import { MockMotionModel } from './generation/mockMotionModel';
 import { parseRokokoRecording } from './recording/rokokoRecording';
 import { DEFAULT_RETARGET_OPTIONS, retargetRecording } from './recording/recordingRetarget';
+
+// Secondary views load on first use, so the interpreter starts faster.
+const QaComparisonView = lazy(() => import('./components/QaComparisonView').then((m) => ({ default: m.QaComparisonView })));
+const DictionaryView = lazy(() => import('./components/DictionaryView').then((m) => ({ default: m.DictionaryView })));
+const ArchitectureView = lazy(() => import('./components/ArchitectureView').then((m) => ({ default: m.ArchitectureView })));
+const RecordingStudioView = lazy(() =>
+  import('./components/RecordingStudioView').then((m) => ({ default: m.RecordingStudioView })),
+);
+
+const ViewFallback = () => (
+  <div className="flex-1 flex items-center justify-center text-sm text-slate-500">Loading…</div>
+);
 
 /** Recorded clips are stored per sign language: "<sign language>:<class id>". */
 const clipKey = (signLanguage: string, classId: string) => `${signLanguage}:${classId}`;
@@ -328,6 +336,7 @@ export default function App() {
         </main>
       )}
 
+      <Suspense fallback={<ViewFallback />}>
       {viewMode === 'qa' && (
         <main className="flex-1 flex overflow-hidden">
           <QaComparisonView
@@ -374,6 +383,7 @@ export default function App() {
           <ArchitectureView />
         </main>
       )}
+      </Suspense>
     </div>
   );
 }

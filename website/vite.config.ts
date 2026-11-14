@@ -8,7 +8,24 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname, '.'),
+      },
+    },
+    build: {
+      // The three.js core build is one ~600 kB module that cannot be split further;
+      // every other chunk stays well below 500 kB.
+      chunkSizeWarningLimit: 750,
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              // Core only: addons (GLTFLoader, OrbitControls, ...) stay with the code that uses them,
+              // so GLTFLoader loads with the on-demand VRM/GLB loader.
+              { name: 'three', test: /node_modules[\\/]three[\\/]build[\\/]/ },
+              { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            ],
+          },
+        },
       },
     },
     server: {
