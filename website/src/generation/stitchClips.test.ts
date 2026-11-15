@@ -1,13 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import type { DictionaryPayload, SignAnimationPayload } from '../types/lis';
-import { localizeClass } from '../i18n/languages';
+import { existsSync } from 'node:fs';
+import type { SignAnimationPayload } from '../types/lis';
 import { IDENTITY, qConj, qFromAxisAngle, qMul, qNormalize, type Quat, type Vec3 } from '../recording/math3d';
 import { detectStroke, qExp, qLog, stitchClips, type TransitionCurve } from './stitchClips';
-import { MockMotionModel } from './mockMotionModel';
-import { motionToAnimation, motionOutputFiles } from './motionToAnimation';
-import { planSigns } from './signPlanner';
+import { motionToAnimation } from './motionToAnimation';
+import { exportDataset } from '../router/exportDataset';
+import type { GeneratedMotion } from './motionModel';
 
 const FPS = 30;
 const H = 1 / FPS;
@@ -180,72 +179,38 @@ test('a hand idle in the middle sign is bridged instead of dropping to rest', ()
   assert.ok(angle(quat(bridged.payload.boneTracks.rightUpperArm, mid), quat(plain.payload.boneTracks.rightUpperArm, midPlain)) < 1e-3);
 });
 
-test('mock per-sign clips are joined into one smooth animation', async () => {
-  const dict = JSON.parse(readFileSync('public/data/dictionary.json', 'utf8')) as DictionaryPayload;
-  const en = dict.classes.map((c) => localizeClass(c, 'en', 'it'));
-  const motion = await new MockMotionModel(en).generate({ text: 'Hello, how are you? Thank you', sourceLanguage: 'en', signLanguage: 'LIS' });
-  assert.equal(motion.files.length, 0);
-  assert.deepEqual(motion.clips?.map((c) => c.gloss), ['CIAO', 'COME-STAI', 'GRAZIE']);
-  assert.equal(motionOutputFiles(motion).length, 12);
+const DATASET = '../dataset/data/processed';
 
-  const anim = motionToAnimation(motion, 'Hello, how are you? Thank you', 'quintic');
+test('real dataset clips are joined: strokes detected, no drop to rest, no jumps', { skip: !existsSync(DATASET) }, () => {
+  const { index, clips } = exportDataset(DATASET, { source: 'test', gloveYawDeg: null, sentences: ['ciao mi chiamo Chiara', 'dove abiti?', 'grazie'] });
+  const pick = (sentence: string) => index.entries.find((e) => e.sentence === sentence)!;
+  const entries = [pick('grazie'), pick('dove abiti?'), pick('ciao mi chiamo Chiara')];
+  const payloads = entries.map((e) => clips.get(e.clip)!);
+  const motion: GeneratedMotion = {
+    files: [],
+    clips: entries.map((e, i) => ({
+      text: e.sentence, gloss: e.sentence, classId: null, files: [], payload: payloads[i],
+      strokeStartSec: e.strokeStartSec, strokeEndSec: e.strokeEndSec,
+    })),
+    segments: [],
+    unmatched: [],
+    model: 'test',
+  };
+  const anim = motionToAnimation(motion, 'test', 'quintic');
   assert.ok(anim);
   const p = anim.payload;
-  const n = p.times.length;
   assert.equal(anim.transitions.length, 2);
-  assert.deepEqual(anim.segments.map((s) => s.gloss), ['CIAO', 'COME-STAI', 'GRAZIE']);
   for (let i = 1; i < anim.segments.length; i++) assert.ok(anim.segments[i].startSec > anim.segments[i - 1].endSec);
-  const clipTotal = motion.clips!.reduce((sum, c) => {
-    const rows = c.files[0].text.trim().split('\n').length - 1;
-    return sum + rows / 30;
-  }, 0);
-  assert.ok(p.duration < clipTotal, `stitched ${p.duration.toFixed(2)} s vs clips ${clipTotal.toFixed(2)} s`);
-  // No jumps across the transitions (the mock's own lead-in from rest is not checked here).
-  let maxStep = 0;
   for (const [bone, f] of Object.entries(p.boneTracks)) {
     assert.ok(f.every(Number.isFinite), bone);
     for (const tr of anim.transitions) {
-      for (let k = Math.round(tr.startSec * 30) - 2; k <= Math.round(tr.endSec * 30) + 2; k++) {
-        maxStep = Math.max(maxStep, angle(quat(f, k - 1), quat(f, k)));
+      for (let k = Math.round(tr.startSec * FPS); k <= Math.round(tr.endSec * FPS); k++) {
+        assert.ok(angle(quat(f, k - 1), quat(f, k)) < 0.3, `${bone}: jump at frame ${k}`);
       }
     }
   }
-  assert.ok(maxStep < 0.3, `max step in transitions ${maxStep.toFixed(3)} rad/frame`);
-  assert.ok(n > 0);
-  // The right arm stays raised between the signs.
-  const rest = quat(p.boneTracks.rightUpperArm, 0);
-  for (const tr of anim.transitions) {
-    const k = Math.round(((tr.startSec + tr.endSec) / 2) * 30);
-    assert.ok(angle(quat(p.boneTracks.rightUpperArm, k), rest) > 0.3, 'right arm drops to rest in a transition');
-  }
-});
-
-test('stored dictionary clips of a multi-sign phrase are joined (stroke detected automatically)', () => {
-  const dict = JSON.parse(readFileSync('public/data/dictionary.json', 'utf8')) as DictionaryPayload;
-  const en = dict.classes.map((c) => localizeClass(c, 'en', 'it'));
-  const plan = planSigns('Hello, how are you? Thank you', en);
-  assert.deepEqual(plan.signs.map((s) => s.cls.id), ['ciao', 'come_stai', 'grazie']);
-  const payloads = plan.signs.map((s) => JSON.parse(readFileSync(`public/data/animations/${s.cls.id}.json`, 'utf8')) as SignAnimationPayload);
-  const r = stitchClips(payloads.map((payload) => ({ payload })));
-  const p = r.payload;
-  assert.equal(r.transitions.length, 2);
-  // These clips have only ~0.13 s of rest at each edge, so the joined phrase is about as long
-  // as the clips one after the other; what changes is that the arms no longer drop between signs.
-  assert.ok(p.duration < payloads.reduce((t, x) => t + x.duration, 0) + 0.5, `stitched ${p.duration}`);
-  const rest = quat(p.boneTracks.rightUpperArm, 0);
-  for (const tr of r.transitions) {
-    const mid = Math.round(((tr.startSec + tr.endSec) / 2) * FPS);
-    assert.ok(angle(quat(p.boneTracks.rightUpperArm, mid), rest) > 0.5, 'right arm drops to rest between signs');
-    for (const f of Object.values(p.boneTracks)) {
-      for (let k = Math.round(tr.startSec * FPS) - 1; k <= Math.round(tr.endSec * FPS) + 1; k++) {
-        assert.ok(angle(quat(f, k - 1), quat(f, k)) < 0.3, `jump at frame ${k}`);
-      }
-    }
-  }
-  // The detected strokes keep the core of each sign.
-  for (const [i, seg] of r.segments.entries()) {
-    const s = detectStroke(payloads[i]);
-    assert.ok(s.endSec - s.startSec > 0.5 * payloads[i].duration, `stroke of ${plan.signs[i].cls.id} too short`);
-    assert.ok(seg.endSec > seg.startSec);
+  // The detected strokes keep most of each recording (the dataset is already trimmed).
+  for (const e of entries) {
+    assert.ok(e.strokeEndSec! - e.strokeStartSec! > 0.4 * e.duration, `${e.sentence}: stroke too short`);
   }
 });

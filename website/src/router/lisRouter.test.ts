@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { stemItalian } from './italianStemmer';
 import { charSimilarity, guardsOk, LisRouter, normalizeText, type LisIndex, type LisIndexEntry, type SentenceEncoder } from './lisRouter';
 import { LisRouterModel } from './lisRouterModel';
 import { motionToAnimation } from '../generation/motionToAnimation';
-import type { DictionaryPayload } from '../types/lis';
-import { localizeClass } from '../i18n/languages';
+import { exportDataset } from './exportDataset';
+import { guessPos } from './lisRouter';
+import { properNames, restoreNames } from './browserTranslator';
 
 test('Italian stemmer matches the Snowball reference', () => {
   // Reference values from the official Snowball implementation (snowballstemmer, Python).
@@ -112,33 +113,84 @@ test('router: semantic match through an encoder, with margin and guards', async 
   assert.notEqual(res.mode, 'sentence');
 });
 
-test('exported demo dataset: router model loads clips, joins them and adds the face markers', async () => {
-  const index = JSON.parse(readFileSync('public/lis/index.json', 'utf8')) as LisIndex;
+test('router: function words with a clip, accents, number words, verb guess', async () => {
+  const r = new LisRouter({
+    version: 1,
+    source: 'test',
+    entries: [
+      entry('con', 'con', 'word', 'NOUN'),
+      entry('giu', 'giu', 'word', 'NOUN'),
+      entry('si', 'si', 'word', 'NOUN'),
+      entry('7', '7', 'word', 'NOUN'),
+      entry('casa', 'casa', 'word', 'NOUN'),
+    ],
+  });
+  // "con" has its own clip: signed; "a" has none: dropped.
+  let res = await r.translate('con te a casa');
+  assert.deepEqual(res.entries.map((e) => e.id), ['con', 'casa']);
+  assert.deepEqual(res.skipped, ['tu']);
+  // accents: "giù" reaches "giu", "sì" reaches "si"; the clitic "si" does not.
+  res = await r.translate('giù, sì');
+  assert.deepEqual(res.entries.map((e) => e.id), ['giu', 'si']);
+  res = await r.translate('si lava');
+  assert.deepEqual(res.entries.map((e) => e.id), []);
+  // number words reach the digit clips
+  res = await r.translate('sette');
+  assert.deepEqual(res.entries.map((e) => e.id), ['7']);
+  assert.equal(guessPos('bere'), 'VERB');
+  assert.equal(guessPos('casa'), 'NOUN');
+});
+
+const DATASET = '../dataset/data/processed';
+
+test('real dataset: export, router model, translation to Italian and cross-lingual match', { skip: !existsSync(DATASET) }, async () => {
+  const { index, clips } = exportDataset(DATASET, { source: 'test', gloveYawDeg: null });
+  assert.ok(index.entries.length >= 100, `${index.entries.length} samples`);
+  assert.ok(index.entries.some((e) => e.kind === 'sentence') && index.entries.some((e) => e.kind === 'word'));
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (url: string | URL) => {
-    const path = String(url).replace(/^\/lis\//, 'public/lis/');
-    return new Response(readFileSync(path, 'utf8'));
+    const payload = clips.get(String(url).replace(/^\/lis\//, ''));
+    return payload ? new Response(JSON.stringify(payload)) : new Response('', { status: 404 });
   }) as typeof fetch;
   try {
     const model = new LisRouterModel(index, '/lis/');
-    const dict = JSON.parse(readFileSync('public/data/dictionary.json', 'utf8')) as DictionaryPayload;
-    model.setDictionary(dict.classes.map((c) => localizeClass(c, 'it', 'it')), (code) => dict.classes.map((c) => localizeClass(c, code, 'it')));
+    // Italian: whole sentence, then words in LIS order with numbers.
+    let out = await model.generate({ text: 'Dove abiti?', sourceLanguage: 'it', signLanguage: 'LIS' });
+    assert.equal(out.route?.mode, 'sentence');
+    assert.deepEqual(out.clips?.map((c) => c.gloss), ['DOVE-ABITI']);
+    out = await model.generate({ text: 'Io mangio a casa alle 19', sourceLanguage: 'it', signLanguage: 'LIS' });
+    assert.equal(out.route?.mode, 'words');
+    assert.deepEqual(out.clips?.map((c) => c.gloss), ['IO', 'CASA', '19', 'MANGIARE']);
+    assert.ok(out.clips?.every((c) => c.payload && c.payload.times.length > 10));
+    const anim = motionToAnimation(out, 'Io mangio a casa alle 19', 'quintic');
+    assert.equal(anim?.transitions.length, 3);
 
-    const it = await model.generate({ text: 'Ciao, mi chiamo Chiara. Non capisco', sourceLanguage: 'it', signLanguage: 'LIS' });
-    assert.deepEqual(it.clips?.map((c) => c.gloss), ['CIAO', 'MI-CHIAMO', 'NON-CAPISCO']);
-    assert.deepEqual(it.unmatched, ['chiara']);
-    assert.deepEqual(it.modifiers, ['negation']);
-    const anim = motionToAnimation(it, 'Ciao, mi chiamo Chiara. Non capisco', 'quintic');
-    assert.ok(anim);
-    assert.equal(anim.transitions.length, 2);
-    const brow = anim.payload.morphTracks.browDown;
-    assert.ok(Math.max(...brow) >= 0.35, 'negation brows');
-
-    // English input goes through the dictionary to Italian first.
-    const en = await model.generate({ text: 'Thank you, goodbye', sourceLanguage: 'en', signLanguage: 'LIS' });
-    assert.equal(en.route?.italian, 'grazie arrivederci');
-    assert.deepEqual(en.clips?.map((c) => c.gloss), ['GRAZIE-ARRIVEDERCI']);
+    // Other languages need their translator; the original text joins the semantic match.
+    await assert.rejects(model.generate({ text: 'Thank you', sourceLanguage: 'en', signLanguage: 'LIS' }), /translator/);
+    model.setTranslator('en', { model: 'fake', toItalian: async (t) => ({ 'thank you': 'grazie', 'i live in verona': 'vivo a verona' })[t.toLowerCase()] ?? t });
+    out = await model.generate({ text: 'Thank you', sourceLanguage: 'en', signLanguage: 'LIS' });
+    assert.equal(out.route?.italian, 'grazie');
+    assert.deepEqual(out.clips?.map((c) => c.gloss), ['GRAZIE']);
+    // "vivo a verona" has no lexical match; a multilingual encoder brings the English
+    // sentence next to "io abito a Verona".
+    const target = 'io abito a verona';
+    await model.setEncoder({
+      name: 'fake',
+      embed: async (texts) => texts.map((t) => Float32Array.from(t === target || t === 'i live in verona' ? [1, 0] : [0, 1])),
+    });
+    out = await model.generate({ text: 'I live in Verona', sourceLanguage: 'en', signLanguage: 'LIS' });
+    assert.equal(out.route?.mode, 'sentence');
+    assert.equal(out.route?.matcher, 'semantic');
+    assert.deepEqual(out.clips?.map((c) => c.gloss), ['IO-ABITO-A-VERONA']);
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test('translator: proper names are restored, hour times normalized', () => {
+  assert.deepEqual(properNames('Hello, my name is Chiara and I live in Verona'), ['Chiara', 'Verona']);
+  assert.deepEqual(properNames('Thank you. Goodbye'), []);
+  assert.equal(restoreNames('My name is Chiara', 'Mi chiamo Calara.'), 'Mi chiamo Chiara.');
+  assert.equal(restoreNames('I live in Verona', 'Vivo a Verona'), 'Vivo a Verona');
+  assert.equal(normalizeText('Il treno è alle 19:00.'), 'il treno è alle 19');
 });

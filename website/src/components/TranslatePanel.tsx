@@ -9,6 +9,8 @@ export interface TranslationResult {
   unmatched: string[];
   /** True when the model returned no motion. */
   empty: boolean;
+  /** The Italian text the router worked on, when the input was in another language. */
+  italian: string | null;
 }
 
 interface TranslatePanelProps {
@@ -18,6 +20,10 @@ interface TranslatePanelProps {
   onChange: (value: string) => void;
   onSubmit: () => void;
   busy: boolean;
+  /** Translation not possible yet (dataset or translator loading, no dataset). */
+  disabled: boolean;
+  /** Why it is disabled, or what is loading. */
+  status: string | null;
   result: TranslationResult | null;
   error: string | null;
 }
@@ -35,11 +41,13 @@ export const TranslatePanel: React.FC<TranslatePanelProps> = ({
   onChange,
   onSubmit,
   busy,
+  disabled,
+  status,
   result,
   error,
 }) => {
   const source = getSourceLanguage(languages.sourceLanguage);
-  const canSend = !busy && value.trim().length > 0;
+  const canSend = !busy && !disabled && value.trim().length > 0;
 
   return (
     <form
@@ -120,7 +128,11 @@ export const TranslatePanel: React.FC<TranslatePanelProps> = ({
           </button>
         </div>
       </div>
-      <p className="text-xs text-slate-400">Enter to translate · Shift+Enter for a new line</p>
+      {status ? (
+        <p role="status" className="text-xs text-slate-600">{status}</p>
+      ) : (
+        <p className="text-xs text-slate-400">Enter to translate · Shift+Enter for a new line</p>
+      )}
 
       {/* Last translation: the signs and the words not signed */}
       {(result || error) && (
@@ -129,7 +141,7 @@ export const TranslatePanel: React.FC<TranslatePanelProps> = ({
             <p className="rounded-lg px-3 py-2 text-xs bg-red-50 border border-red-200 text-red-800">{error}</p>
           ) : result?.empty ? (
             <p className="rounded-lg px-3 py-2 text-xs bg-amber-50 border border-amber-200 text-amber-900">
-              No sign found for “{result.text}”
+              No sign found for “{result.text}”{result.italian ? ` (Italian: “${result.italian}”)` : ''}
             </p>
           ) : (
             <>
@@ -144,6 +156,11 @@ export const TranslatePanel: React.FC<TranslatePanelProps> = ({
                   </span>
                 ))}
               </div>
+              {result?.italian && (
+                <p className="text-xs text-slate-500">
+                  Italian: <span lang="it">“{result.italian}”</span>
+                </p>
+              )}
               {!!result?.unmatched.length && (
                 <p className="text-xs text-amber-800">Not signed: {result.unmatched.join(', ')}</p>
               )}

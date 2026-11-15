@@ -13,8 +13,8 @@
  *   - `clips`: one recording per sign, each starting and ending at rest. The site joins them
  *     with smooth transitions (src/generation/stitchClips.ts).
  *
- * Until the real model exists, MockMotionModel generates these files in the browser.
- * Set VITE_MOTION_MODEL_URL to use a real model over HTTP instead.
+ * The site uses the LIS router over the exported dataset (src/router/lisRouterModel.ts).
+ * Set VITE_MOTION_MODEL_URL to use a model server over HTTP instead.
  */
 
 import type { RecordingFileInput } from '../recording/rokokoRecording';
@@ -35,7 +35,7 @@ export interface GlossSegment {
   text: string;
   /** Gloss of the sign, e.g. "GRAZIE". */
   gloss: string;
-  /** Dictionary class, when the sign is in the dictionary. */
+  /** Dataset class or dictionary id of the sign, when known. */
   classId: string | null;
   startSec: number;
   endSec: number;

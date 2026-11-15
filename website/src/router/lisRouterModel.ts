@@ -1,23 +1,17 @@
 /**
  * Motion generator backed by the LIS router and the exported dataset (public/lis/).
  *
- * text -> LisRouter (whole sentence, or words in LIS order) -> clips of the dataset samples
- * (already retargeted at export time) -> joined by the site with smooth transitions.
- * Everything runs in the browser: it works on a static host (GitHub Pages).
- *
- * The router is Italian (like model/lis_router.py). Other source languages are first mapped
- * to Italian through the dictionary phrases (planSigns); words with no dictionary phrase are
- * passed through and usually end up not signed.
+ * text -> (translation to Italian) -> LisRouter (whole sentence, or words in LIS order) ->
+ * clips of the dataset samples (already retargeted at export time) -> joined by the site with
+ * smooth transitions. Everything runs in the browser: it works on a static host (GitHub Pages).
  */
-import type { DictionaryClass, SignAnimationPayload } from '../types/lis';
+import type { SignAnimationPayload } from '../types/lis';
 import type { GeneratedClip, GeneratedMotion, GlossSegment, MotionGenerator, MotionRequest } from '../generation/motionModel';
-import { planSigns } from '../generation/signPlanner';
 import { LisRouter, type LisIndex, type LisIndexEntry, type RouterOptions, type SentenceEncoder } from './lisRouter';
+import type { Translator } from './browserTranslator';
 
-export const LIS_INDEX_PATH = 'lis/index.json';
-
-/** State of the optional semantic sentence match (browser encoder). */
-export type SemanticState =
+/** State of a model loaded in the browser (sentence encoder, translator). */
+export type ModelState =
   | { status: 'off' }
   | { status: 'loading'; fraction: number | null }
   | { status: 'on' }
@@ -28,8 +22,7 @@ export class LisRouterModel implements MotionGenerator {
   readonly router: LisRouter;
   private readonly baseUrl: string;
   private readonly clipCache = new Map<string, Promise<SignAnimationPayload>>();
-  /** Italian dictionary classes (for non-Italian input), and the classes in the request language. */
-  private dictionary: { base: DictionaryClass[]; bySource: (code: string) => DictionaryClass[] } | null = null;
+  private readonly translators = new Map<string, Translator>();
 
   constructor(readonly index: LisIndex, baseUrl: string, options: Partial<RouterOptions> = {}) {
     this.router = new LisRouter(index, options);
@@ -37,13 +30,13 @@ export class LisRouterModel implements MotionGenerator {
   }
 
   /** Loads the exported index; null when the site has no exported dataset. */
-  static async load(baseUrl: string, options: Partial<RouterOptions> = {}): Promise<LisRouterModel | null> {
+  static async load(indexUrl: string, options: Partial<RouterOptions> = {}): Promise<LisRouterModel | null> {
     try {
-      const res = await fetch(`${baseUrl}${LIS_INDEX_PATH}`);
+      const res = await fetch(indexUrl);
       if (!res.ok) return null;
       const index = (await res.json()) as LisIndex;
       if (index?.version !== 1 || !Array.isArray(index.entries) || !index.entries.length) return null;
-      return new LisRouterModel(index, `${baseUrl}lis/`, options);
+      return new LisRouterModel(index, indexUrl.replace(/[^/]*$/, ''), options);
     } catch {
       return null;
     }
@@ -51,26 +44,21 @@ export class LisRouterModel implements MotionGenerator {
 
   get name(): string {
     const enc = this.router.encoderName;
-    return `LIS router · ${this.index.source} dataset (${this.index.entries.length} clips)${enc ? ` · ${enc}` : ''}`;
-  }
-
-  setDictionary(base: DictionaryClass[], bySource: (code: string) => DictionaryClass[]): void {
-    this.dictionary = { base, bySource };
+    return `LIS router · ${this.index.source} (${this.index.entries.length} clips)${enc ? ` · ${enc}` : ''}`;
   }
 
   setEncoder(encoder: SentenceEncoder | null): Promise<void> {
     return this.router.setEncoder(encoder);
   }
 
-  /** Non-Italian text -> Italian, phrase by phrase through the dictionary. */
-  toItalian(text: string, sourceLanguage: string): string {
-    if (sourceLanguage === 'it' || !this.dictionary) return text;
-    const classes = this.dictionary.bySource(sourceLanguage);
-    const { signs, unmatched } = planSigns(text, classes);
-    if (!signs.length) return text;
-    const baseById = new Map(this.dictionary.base.map((c) => [c.id, c]));
-    const parts = signs.map((s) => (baseById.get(s.cls.id)?.phrase ?? s.cls.phrase).replace(/\.\.\.|…/g, '').toLowerCase());
-    return [...parts, ...unmatched].join(' ').trim() + (text.trim().endsWith('?') ? '?' : '');
+  /** Translator for a source language (to Italian). */
+  setTranslator(sourceLanguage: string, translator: Translator | null): void {
+    if (translator) this.translators.set(sourceLanguage, translator);
+    else this.translators.delete(sourceLanguage);
+  }
+
+  hasTranslator(sourceLanguage: string): boolean {
+    return sourceLanguage === 'it' || this.translators.has(sourceLanguage);
   }
 
   private clip(entry: LisIndexEntry): Promise<SignAnimationPayload> {
@@ -87,12 +75,18 @@ export class LisRouterModel implements MotionGenerator {
   }
 
   async generate(request: MotionRequest, signal?: AbortSignal): Promise<GeneratedMotion> {
-    const italian = this.toItalian(request.text, request.sourceLanguage);
-    const res = await this.router.translate(italian);
+    let italian = request.text;
+    if (request.sourceLanguage !== 'it') {
+      const translator = this.translators.get(request.sourceLanguage);
+      if (!translator) throw new Error('The translator to Italian is still loading.');
+      italian = await translator.toItalian(request.text);
+    }
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    // The encoder is multilingual: the original text also takes part in the sentence match.
+    const res = await this.router.translate(italian, request.sourceLanguage !== 'it' ? [request.text] : []);
     const payloads = await Promise.all(res.entries.map((e) => this.clip(e)));
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-    const gloss = (s: string) => s.toUpperCase().replace(/\s+/g, '-');
+    const gloss = (s: string) => s.toUpperCase().replace(/[?!.,]/g, '').trim().replace(/\s+/g, '-');
     const clips: GeneratedClip[] = res.entries.map((e, i) => ({
       text: e.sentence,
       gloss: gloss(e.sentence),

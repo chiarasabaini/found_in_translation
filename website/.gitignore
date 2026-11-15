@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Generated from ../dataset/data/processed by npm prebuild / predev
+public/lis/
