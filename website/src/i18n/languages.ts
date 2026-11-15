@@ -2,63 +2,41 @@
  * Language settings.
  *
  * The UI is always in English. Two choices are configurable:
- *   - source language: the language of the phrase the user types (matched against the dictionary);
- *   - sign language: the target sign language, which selects the dictionary and its animations.
- *
- * To add a sign language, add an entry to SIGN_LANGUAGES with its own dictionary.json
- * (same format as public/data/dictionary.json). To add a source language, add it to
- * SOURCE_LANGUAGES and give every dictionary class a `translations.<code>` entry.
+ *   - source language: the language of the phrase the user types. The LIS router works on
+ *     Italian; other languages are translated to Italian in the browser first
+ *     (src/router/browserTranslator.ts);
+ *   - sign language: the target sign language, which selects the exported dataset.
  */
 
 import { useEffect, useState } from 'react';
-import type { DictionaryClass } from '../types/lis';
-import { BASE_URL } from '../utils/baseUrl';
 
 export interface SourceLanguage {
   code: string;
   label: string;
   placeholder: string;
-  /** Example phrases (checked by the tests: the mock model signs all of them). */
-  examples: string[];
+  /** Model that translates this language to Italian in the browser (none for Italian). */
+  toItalianModel: string | null;
 }
 
 export interface SignLanguage {
   code: string;
   label: string;
-  /** Dictionary of the sign language (the vocabulary of the mock model). */
-  dictionaryUrl: string;
+  /** Exported dataset index, relative to the site (see scripts/export-lis-dataset.ts). */
+  indexPath: string;
 }
 
 export const SOURCE_LANGUAGES: SourceLanguage[] = [
   {
     code: 'en',
     label: 'English',
-    placeholder: 'Enter text, e.g. "Hello, how are you?"',
-    examples: [
-      'Hello',
-      'Thank you',
-      'Hello, how are you?',
-      'My name is...',
-      'I need help, please',
-      'Water, thank you',
-      "Sorry, I don't understand",
-      'Goodbye',
-    ],
+    placeholder: 'Enter text, e.g. "Where do you live?"',
+    toItalianModel: 'Xenova/opus-mt-en-it',
   },
   {
     code: 'it',
     label: 'Italiano',
-    placeholder: 'Scrivi una frase, es. "Ciao, come stai?"',
-    examples: [
-      'Ciao',
-      'Grazie',
-      'Ciao, come stai?',
-      'Mi chiamo...',
-      'Aiuto, per favore',
-      'Acqua, grazie',
-      'Scusa, non capisco',
-      'Arrivederci',
-    ],
+    placeholder: 'Scrivi una frase, es. "Dove abiti?"',
+    toItalianModel: null,
   },
 ];
 
@@ -66,7 +44,7 @@ export const SIGN_LANGUAGES: SignLanguage[] = [
   {
     code: 'LIS',
     label: 'LIS – Italian Sign Language',
-    dictionaryUrl: `${BASE_URL}data/dictionary.json`,
+    indexPath: 'lis/index.json',
   },
 ];
 
@@ -115,21 +93,4 @@ export function getSourceLanguage(code: string): SourceLanguage {
 
 export function getSignLanguage(code: string): SignLanguage {
   return SIGN_LANGUAGES.find((l) => l.code === code) ?? SIGN_LANGUAGES[0];
-}
-
-/**
- * Returns the class with phrase, category, description and synonyms in `language`.
- * Falls back to the base fields when the dictionary has no text for that language.
- */
-export function localizeClass(cls: DictionaryClass, language: string, baseLanguage = 'it'): DictionaryClass {
-  if (language === baseLanguage) return cls;
-  const t = cls.translations?.[language];
-  if (!t) return cls;
-  return {
-    ...cls,
-    phrase: t.phrase,
-    category: t.category ?? cls.category,
-    description: t.description ?? cls.description,
-    synonyms: t.synonyms ?? [],
-  };
 }

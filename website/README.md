@@ -1,42 +1,43 @@
 # Found in Translation — website
 
-A one-page translator from text to Italian Sign Language (LIS). You type a phrase, as in a text translator, and a 3D avatar signs it.
+A one-page translator from English or Italian to Italian Sign Language (LIS). You type a phrase, as in a text translator, and a 3D avatar signs it with the recordings of the LIS dataset ([`dataset/`](../dataset/)). Everything runs in the browser: the site is static and deploys to GitHub Pages.
 
 ## The page
 
-- **Left column:** the title, the translator (languages from English or Italian to LIS, the text, **Translate**), the result, and the **Settings** at the bottom. Enter translates, Shift+Enter adds a new line.
-- **Result:** the signs (glosses, e.g. `CIAO · MI-CHIAMO`) and the words that could not be signed.
-- **Avatar** on the right, with a compact player (play, replay, timeline, speed) at the bottom center. Drag to orbit the camera; narrow screens get a wider framing so the arms stay in view. On phones the avatar is on top and the column below.
-- **Settings:** avatar choice and local VRM/GLB upload, avatar details (bones, face rig), **Show skeleton**, transition curve between signs, motion model (with the optional semantic match), how the last phrase was routed, download of the last model output.
+- **Left column:** the title, the translator (languages, the text, **Translate**), the result, and the **Settings** at the bottom. Enter translates, Shift+Enter adds a new line.
+- **Result:** the signs (glosses, e.g. `IO · CASA · 19 · MANGIARE`), the Italian text the router used when the input is English, and the words that could not be signed.
+- **Avatar** on the right, in the rest pose (arms along the sides) until the first phrase, with a compact player (play, replay, timeline, speed) at the bottom center. Drag to orbit the camera. On phones the avatar is on top and the column below.
+- **Settings:** avatar choice and local VRM/GLB upload, avatar details (bones, face rig), **Show skeleton**, transition curve between signs, the semantic sentence match, how the last phrase was routed, download of the last model output (model server only).
 
-## Languages
+## From text to signs
 
-- The UI is in English.
-- **From** (left language picker): the language of the phrase you type. English and Italian are available. Each dictionary class has its text per language: the base fields (`phrase`, `category`, `description`, `synonyms`) use `metadata.base_language` (`it`), and `translations.<code>` holds the other languages.
-- **To** (right language picker): the target sign language. It selects the dictionary (the vocabulary of the mock model). LIS is available.
-- The choice is remembered per browser (localStorage).
+```
+English text ─► translator to Italian (browser, opus-mt-en-it) ─┐
+Italian text ───────────────────────────────────────────────────┴─► LisRouter
+   1. whole sentence: exact, semantic (multilingual encoder, also with the English text) or
+      lexical match, with the negation / number guards and the margin of model/lis_router.py
+   2. else words in LIS order: time → subject → object → verb → negation → question word;
+      dataset phrases found inside the text are one clip ("mi chiamo")
+─► dataset clips (public/lis/, already retargeted) ─► joined with smooth transitions
+─► face markers for questions and negation ─► avatar
+```
 
-To add a source language: add it to `SOURCE_LANGUAGES` in `src/i18n/languages.ts` and add `translations.<code>` to every class in `config/dictionary.yaml` (then re-run the pipeline) or directly in `public/data/dictionary.json`.
-To add a sign language: add an entry to `SIGN_LANGUAGES` with its own `dictionary.json`.
+- **Router** (`src/router/lisRouter.ts`): TypeScript port of [`model/lis_router.py`](../model/README.md). No spaCy in the browser: function-word lists (a function word is signed when the dataset has a clip for it, e.g. "con"), a table of irregular verbs, the Snowball Italian stemmer (`src/router/italianStemmer.ts`, checked against the reference implementation), number words to digits ("sette" → the clip "7"), accent folding ("giù" → "giu"), the POS of the dataset words.
+- **Translator** (`src/router/browserTranslator.ts`): `Xenova/opus-mt-en-it`, loaded when English is the source language (~130 MB once, then cached). Proper names the model changes are put back ("Calara" → "Chiara"); "19:00" becomes "19".
+- **Semantic match** (`src/router/browserEncoder.ts`): `Xenova/multilingual-e5-small` (~120 MB once, then cached), on by default, can be turned off in the settings. It is multilingual, so the English text also matches the Italian dataset sentences ("Where do you live?" → "dove abiti?"). Without it the whole-sentence step uses exact and character similarity.
+- Both models run with transformers.js, loaded from the CDN only when needed (`src/router/transformersCdn.ts`).
+- **Face markers** from the router modifiers: raised brows for yes/no questions, furrowed brows for wh-questions, furrowed brows and a frown for negation.
+- **Speed:** a phrase takes ~150–400 ms in the browser (translation included); the router itself < 1 ms. First load of the two models: ~10 s on a fast connection, ~1–5 s from the cache.
 
-## Project structure
+## The dataset in the site
 
-- `config/dictionary.yaml` — Closed dictionary (10 LIS classes), phrases and synonyms per source language, body-relative spatial anchors and manual prototype override.
-- `config/sensors_and_retargeting.yaml` — Header-driven mapping of the raw Smartgloves II CSV, quaternion order (`xyzw`/`wxyz`), cleaning/EMF thresholds, phalanx weights, IK arm lengths, 52 ARKit blendshape mapping.
-- `pipeline/` — Offline pipeline, Python 3.10+:
-  - `synthetic_generator.py`: generates a synthetic Smartgloves II CSV dataset (right/left hand, initial reset frame, ~83 Hz local microsecond clock, Group 1 + Hub + EM-corrected Group 2, dropouts and EMF spikes) + Face Mesh JSON (~30 fps, 52 blendshapes + head pose).
-  - `glove_loader.py`: header-driven parser, reset frame removal, Group 1 vs Group 2 comparison, flag/EMF masking.
-  - `signal_processing.py`: quaternion sign continuity, dropout SLERP, 1-Euro filter, resampling to a fixed frame rate (30 fps).
-  - `prototype_selector.py`: per-class prototype selection with DTW medoid (manual override supported).
-  - `retargeting.py`: neutral pose calibration, finger curl relative to the back of the hand spread over the phalanges, analytical 2-bone IK toward the class anchor, fade from/to the rest pose, face blendshape mapping.
-  - `qa_compare.py`: QA metrics and `public/data/qa_summary.json`.
-  - `run_pipeline.py`: full orchestrator.
-- `src/` — Static client-side web app (React + Three.js + `@pixiv/three-vrm`).
-  - `src/recording/`: import of recording-format CSV files (parser, retargeting, segment detection). The model output goes through it. It does not depend on three.js, so it runs under `node --test`.
-  - `src/generation/`: motion model client, mock model, phrase-to-signs planner, clip joining (`stitchClips.ts`).
-  - `src/components/`: the page (`TranslateComposer`, `SettingsMenu`, `AvatarViewport`).
-  - `src/i18n/languages.ts`: source and sign language settings.
-- `public/data/` — `dictionary.json` (vocabulary of the mock model) and the pipeline outputs (`animations/*.json`, `qa_summary.json`), which the page no longer plays.
+The build exports the post-processed recordings of [`dataset/data/processed`](../dataset/data/processed) for the browser: `npm run build` and `npm run dev` run `scripts/export-lis-dataset.ts` first (`prebuild` / `predev`), which writes `public/lis/index.json` (sentences, word lemmas and POS, stroke times) and `public/lis/clips/<id>.json` (bone quaternions and face morphs at 30 fps, retargeted with the site code). `public/lis/` is generated, not committed. 139 samples take ~2.5 s and ~20 MB; the browser fetches only the clips it plays.
+
+```bash
+npm run export:lis -- <dataset-root> --out public/lis --source "LIS dataset"   # by hand, other datasets
+```
+
+`metadata.json` of each sample: `"sentence"` (required), optional `"type"` (`word` / `sentence`, default: one word = word clip), `"lemma"`, `"pos"` (`VERB`, `NOUN`, …; guessed from the ending when missing). Without a dataset the page says so and does not translate.
 
 ## Recording format
 
@@ -52,50 +53,29 @@ All files share `timestamp_ms`.
 
 Retargeting method (`src/recording/recordingRetarget.ts`): bone directions from joint positions (3 phalanges per finger, back of the hand, forearm), upper arm from `body.csv`, head from the face landmarks relative to the median pose, ARKit blendshapes → avatar morphs. The axis signs of `body.csv` and the camera mirroring are detected automatically.
 
-## LIS router (static, in the browser)
+Retargeting method (`src/recording/recordingRetarget.ts`): bone directions from joint positions (3 phalanges per finger, back of the hand, forearm), upper arm from `body.csv`, head from the face landmarks relative to the median pose, ARKit blendshapes → avatar morphs. The axis signs of `body.csv` and the camera mirroring are detected automatically.
 
-The page signs with the recordings of the LIS dataset, chosen by the router of [`model/`](../model/README.md), ported to the browser so the site stays static (GitHub Pages: no server, no Python):
+## Joining the clips
 
-```
-text ─► LisRouter (src/router/lisRouter.ts)
-          1. whole sentence: exact match, else semantic (optional encoder) or lexical match,
-             with the negation / number guards and the margin of lis_router.py
-          2. else words in LIS order: time → subject → object → verb → negation → question word;
-             dataset phrases found inside the text are used as one clip ("mi chiamo")
-     ─► clips of public/lis/ (already retargeted) ─► stitchClips ─► face markers ─► avatar
-```
+`src/generation/stitchClips.ts` turns the per-sign clips into one animation:
 
-- **No spaCy in the browser:** function-word lists, a table of irregular verbs, the Snowball Italian stemmer (`src/router/italianStemmer.ts`, checked against the reference implementation) and the POS of the dataset words.
-- **Face markers** from the router modifiers: raised brows for yes/no questions, furrowed brows for wh-questions, furrowed brows and a frown for negation.
-- **Other source languages** (English) go to Italian through the dictionary phrases first.
-- **Semantic match (optional):** the settings turn on a sentence encoder (`Xenova/multilingual-e5-small`, transformers.js loaded from the CDN, ~120 MB downloaded once and cached). Without it the whole-sentence step uses exact and character similarity, and paraphrases ("come va?" → "come stai") fall back to the words.
-- **Speed:** router query < 1 ms, index of a few kB, each clip ~80 kB fetched on demand. The Python router needs ~5.6 s to load (e5-base + spaCy) and ~17 ms per query, and a server.
+1. Each clip is retargeted on its own: at export time for the dataset clips, in the browser for model-server output (one glove yaw for all clips).
+2. The stroke of every sign is kept unchanged, plus the lead-in of the first sign and the lead-out of the last one. The rest pose between signs is removed.
+3. Each gap gets a transition from the end pose of sign A to the start pose of sign B. It matches pose and velocity (and acceleration, with the quintic curve) at both ends:
+   - bone rotations: Hermite curve on the rotation vector, `q(t) = q0 · exp(h(t))`; the end velocity goes through the inverse right Jacobian of SO(3), so the angular velocity matches at both joins;
+   - blendshapes: scalar Hermite curve, clamped to [0, 1].
+4. The transition time comes from the largest arm rotation (0.15–0.6 s), and it is long enough that no bone goes faster than 7 rad/s (arms) or 12 rad/s (fingers, head) at its peak.
+5. A hand that is idle in a sign between two signs that use it does not drop to rest: one long transition bridges it.
 
-### Export the dataset for the site
+Curves: **Quintic (minimum jerk)**, the default, is C2 and gives the bell-shaped speed profile of human reaching movements; **Cubic Hermite** is C1. Pick one in the settings to compare them on the same output, without a new model request.
 
-```bash
-npm run export:lis -- ../dataset/output_processed --source "LIS dataset"   # writes public/lis/
-```
+Limit: the transitions are smooth but neutral. Real coarticulation (the handshape of B forming during A) needs a model trained on continuous phrases or a motion in-betweening network.
 
-`scripts/export-lis-dataset.ts` reads every sample folder (`metadata.json` + the 4 CSV files), retargets it with the site code and writes `public/lis/index.json` and `public/lis/clips/<id>.json` (bone quaternions and face morphs at 30 fps). `metadata.json` can set `"type"` (`word` / `sentence`), `"lemma"` and `"pos"` (`VERB`, `NOUN`, …; guessed from the ending when missing). Commit `public/lis/` and the static build serves it.
+## Model server (optional)
 
-The repository ships a **demo** export: 13 samples synthesized by the mock model (`npm run dataset:demo -- <dir>`, then the export). **The demo handshapes are not validated LIS signs.** Without `public/lis/index.json` the site falls back to the mock model.
+With `VITE_MOTION_MODEL_URL` set at build time (see `.env.example`), the page sends the phrase to that server instead of the browser router, for example `model/lis_router.py` behind an HTTP endpoint that reads the sample folders and answers with `clips`.
 
-### GitHub Pages
-
-The build uses a relative base (`base: './'` in `vite.config.ts`), so `dist/` works under any path (`https://<user>.github.io/<repo>/`). The workflow `.github/workflows/pages.yml` builds `website/` (tests included) and deploys `dist/` on every push to `main`. One-time setup by a repository admin: **Settings → Pages → Build and deployment → Source: GitHub Actions** (with "Deploy from a branch", Pages serves the repository files, not the built site). The site is then at `https://<owner>.github.io/<repo>/`.
-
-## Motion model (text → motion)
-
-Order of the generators: a model server when `VITE_MOTION_MODEL_URL` is set, else the LIS router over `public/lis/`, else the mock. The typed phrase goes to a text-to-motion model. The model returns recording-format files (one clip per sign, or one recording of the whole phrase), and the site animates the avatar with the recording import and retargeting, joining the clips with smooth transitions. The user does not choose how the signs are produced.
-
-The real model does not exist yet. Until then, `src/generation/mockMotionModel.ts` plays its role in the browser: it splits the phrase into dictionary signs (`src/generation/signPlanner.ts`) and synthesizes one rest-to-rest clip per sign (CSV files at 30 Hz) from placeholder handshapes, the dictionary anchors and motion arcs, and arm IK, as the real model will. **The mock handshapes are not validated LIS signs.** The page shows the gloss sequence and the words it could not sign; the settings download the generated CSV files.
-
-To use the real model, set `VITE_MOTION_MODEL_URL` at build time (see `.env.example`).
-
-The repository router (`model/lis_router.py`) returns sample folders of the dataset: `mode="sentence"` (one folder for the whole phrase) or `mode="words"` (one folder per word, in LIS order). A backend endpoint can read those folders and answer with `clips` (one clip per folder, the CSV files as text); the site then joins them.
-
-### Motion model API
+### API
 
 ```
 POST <VITE_MOTION_MODEL_URL>
@@ -138,62 +118,36 @@ File contract (same as the "Recording format" table above):
 - `face.csv` is optional: ARKit blendshapes `bs_<name>` and the landmarks `face_1`, `face_10`, `face_33`, `face_152`, `face_263` for head rotation are enough.
 - `segments`, `unmatched` and `model` are optional; they only feed the UI.
 
-### Joining per-sign clips
-
-`src/generation/stitchClips.ts` turns the per-sign clips into one animation:
-
-1. Each clip is retargeted on its own (one glove yaw for all clips). Dictionary clips are already retargeted.
-2. The stroke of every sign is kept unchanged, plus the lead-in of the first sign and the lead-out of the last one. The rest pose between signs is removed.
-3. Each gap gets a transition from the end pose of sign A to the start pose of sign B. It matches pose and velocity (and acceleration, with the quintic curve) at both ends:
-   - bone rotations: Hermite curve on the rotation vector, `q(t) = q0 · exp(h(t))`; the end velocity goes through the inverse right Jacobian of SO(3), so the angular velocity matches at both joins;
-   - blendshapes: scalar Hermite curve, clamped to [0, 1].
-4. The transition time comes from the largest arm rotation (0.15–0.6 s), and it is long enough that no bone goes faster than 7 rad/s (arms) or 12 rad/s (fingers, head) at its peak.
-5. A hand that is idle in a sign between two signs that use it does not drop to rest: one long transition bridges it.
-
-Curves: **Quintic (minimum jerk)**, the default, is C2 and gives the bell-shaped speed profile of human reaching movements; **Cubic Hermite** is C1. Pick one in the settings to compare them on the same output, without a new model request.
-
-Limit: the transitions are smooth but neutral. Real coarticulation (the handshape of B forming during A) needs a model trained on continuous phrases or a motion in-betweening network.
-
 Training data notes: normalize the glove yaw of each recording first (the gloves are referenced to magnetic north; `estimateGloveYawDeg` in `src/recording/recordingRetarget.ts` gives the estimate the site uses), and record the gloves at full rate (83 Hz) when possible.
 
-The model normally runs on a GPU server, not in the browser. AI Studio apps can have a Node backend (`express` is already a dependency) that forwards the request and keeps API keys secret; the browser then calls that backend route.
+## Project structure
 
-## Quick commands
+- `src/router/`: router, stemmer, translator, encoder, dataset export (`exportDataset.ts`, Node only).
+- `src/generation/`: clip joining (`stitchClips.ts`), model output to animation, model-server client.
+- `src/recording/`: recording-format CSV parser and retargeting (no three.js: runs under `node --test`).
+- `src/three/`: avatars, universal skeleton retargeting, automatic face rig.
+- `src/components/`: the page (`TranslatePanel`, `SettingsPanel`, `AvatarViewport`).
+- `scripts/export-lis-dataset.ts`: dataset → `public/lis/`.
 
-### 1. Python pipeline (tests + synthetic generation + JSON export)
-
-```bash
-# Optional, local environment with pip:
-pip install -r pipeline/requirements.txt
-
-# Unit tests (also work with the Python 3.10 standard library only):
-PYTHONPATH=. python3 -m unittest discover -s pipeline/tests -v
-
-# Generate synthetic data and export the tracks for the web app:
-python3 -m pipeline.run_pipeline --clips-per-class 4 --signers 4 --regenerate
-```
-
-To use a real raw-sensor dataset instead of the synthetic one, create a `dataset_manifest.json` in the dataset folder (with `class_id`, `clip_id`, `right_csv`, `left_csv`, `face_json`) and run:
-
-```bash
-python3 -m pipeline.run_pipeline --dataset data/real --out public/data
-```
-
-### 2. Web app (development, TypeScript tests and static build)
+## Commands
 
 ```bash
 npm install
-npm test        # recording import, matcher, clip builder, languages, mock model, face rig, clip joining
+npm run dev     # exports the dataset, then http://localhost:3000
+npm test        # router, stemmer, clip joining, retargeting, face rig, real-dataset checks
 npm run lint
-npm run build
-npm run dev
+npm run build   # exports the dataset, then the static site in dist/
 ```
 
-Test the recording import on a real recording:
+Test the recording import on a raw recording folder:
 
 ```bash
-LIS_RECORDING_DIR=/path/to/test_1_20261114_162048 node --test src/recording/recording.test.ts
+LIS_RECORDING_DIR=/path/to/recording node --test src/recording/recording.test.ts
 ```
+
+## GitHub Pages
+
+The build uses a relative base (`base: './'` in `vite.config.ts`), so `dist/` works under any path (`https://<owner>.github.io/<repo>/`). The workflow `.github/workflows/pages.yml` installs, tests, builds (dataset export included) and deploys `dist/` on every push to `main` (repository setting: **Pages → Source: GitHub Actions**).
 
 ## Avatars
 
@@ -209,7 +163,7 @@ The built-in choice is remembered per browser (localStorage). To add a built-in 
 
 1. Export a free humanoid avatar from **VRoid Studio / VRoid Hub** (`.vrm`) or **Ready Player Me** (`.glb` with ARKit blendshapes).
 2. In the web app, open **Settings** in the left column and click **Load VRM / GLB** to test the local file with `@pixiv/three-vrm`.
-3. If the morph target names differ from the ARKit standard, update `retargeting.face_blendshape_map` in `config/sensors_and_retargeting.yaml` and re-run `python3 -m pipeline.run_pipeline` (for recordings: `FACE_BLENDSHAPE_MAP` in `src/recording/recordingRetarget.ts`).
+3. If the morph target names differ from the ARKit standard, update `FACE_BLENDSHAPE_MAP` in `src/recording/recordingRetarget.ts`.
 
 ### Face rig: three levels, chosen per channel
 

@@ -4,7 +4,7 @@ import { BUILTIN_AVATARS, DEFAULT_AVATAR_ID, type AvatarChoice } from '../avatar
 import type { TransitionCurve } from '../generation/stitchClips';
 import type { RecordingFileInput } from '../recording/rokokoRecording';
 import type { GeneratedMotion } from '../generation/motionModel';
-import type { SemanticState } from '../router/lisRouterModel';
+import type { ModelState } from '../router/lisRouterModel';
 
 const FILE_OPTION = '__file__';
 
@@ -21,7 +21,7 @@ interface SettingsPanelProps {
   outputFiles: RecordingFileInput[];
   onDownloadFile: (file: RecordingFileInput) => void;
   /** Semantic sentence match of the router; null when the generator is not the router. */
-  semantic: SemanticState | null;
+  semantic: ModelState | null;
   onToggleSemantic: (on: boolean) => void;
   /** How the router handled the last phrase. */
   lastRoute: GeneratedMotion['route'] | null;
@@ -165,7 +165,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   onChange={(e) => onToggleSemantic(e.target.checked)}
                 />
                 <span>
-                  Semantic sentence match (paraphrases like “come va?” → “come stai”). Downloads a ~120 MB model once.
+                  Semantic sentence match: paraphrases and English text match the dataset sentences. Downloads a ~120 MB model once.
                   {semantic.status === 'loading' && (
                     <span className="block text-slate-500">
                       Loading{semantic.fraction !== null ? ` ${Math.round(semantic.fraction * 100)}%` : '…'}

@@ -113,6 +113,9 @@ const FUNCTION_WORDS = new Set([
   'ci', 'ne', 'si', 'vi', 'mi', 'ti', 'c', 'm', 't', 's',
 ]);
 
+/** Clitic pronouns: never signed on their own ("si" here is not "sì"). */
+const CLITICS = new Set(['ci', 'ne', 'si', 'vi', 'mi', 'ti', 'c', 'm', 't', 's', 'l', 'd']);
+
 /** Forms of "essere" (copula or auxiliary: LIS has no copula). */
 const ESSERE = new Set([
   'essere', 'sono', 'sei', 'è', 'è', 'siamo', 'siete', 'ero', 'eri', 'era', 'eravamo', 'eravate', 'erano', 'sarò',
@@ -154,9 +157,16 @@ export function normalizeText(text: string): string {
     .normalize('NFC')
     .toLowerCase()
     .trim()
+    // "19:00", "19.00" -> "19" (times on the hour, as the translator writes them)
+    .replace(/\b(\d{1,2})[:.]00\b/g, '$1')
     .replace(/[^\p{L}\p{N}_\s']/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** Lowercase without accents: "giù" and "giu", "sì" and "si" reach the same clip. */
+export function fold(word: string): string {
+  return word.normalize('NFD').replace(/\p{M}+/gu, '').normalize('NFC');
 }
 
 export function tokens(norm: string): string[] {
@@ -198,7 +208,7 @@ export function charSimilarity(a: string, b: string): number {
 
 /** Guess of the POS of a dataset word when metadata.json has none: infinitives are verbs. */
 export function guessPos(word: string): string {
-  return /(are|ere|ire|rre)$/.test(word) && word.length > 4 ? 'VERB' : 'NOUN';
+  return /(are|ere|ire|rre)$/.test(word) && word.length >= 4 ? 'VERB' : 'NOUN';
 }
 
 // ---------------------------------------------------------------------------
@@ -245,7 +255,7 @@ export class LisRouter {
       if (!isWord) continue;
       const lemma = (e.lemma ?? e.norm).toLowerCase();
       // Same key: the first sample wins (as in the Python router).
-      for (const key of [lemma, e.norm]) if (!this.words.has(key)) this.words.set(key, e);
+      for (const key of [lemma, e.norm, fold(lemma), fold(e.norm)]) if (!this.words.has(key)) this.words.set(key, e);
       for (const key of [stemItalian(lemma), stemItalian(e.norm)]) if (!this.stems.has(key)) this.stems.set(key, e);
     }
   }
@@ -301,10 +311,20 @@ export class LisRouter {
 
   /** Lemma and clip of one word. */
   private lookup(token: string): { lemma: string; entry: LisIndexEntry | null } {
-    const lemma = IRREGULAR[token] ?? token;
+    const lemma = IRREGULAR[token] ?? (token in NUMBER_WORDS ? String(NUMBER_WORDS[token]) : token);
     const entry =
-      this.words.get(token) ?? this.words.get(lemma) ?? this.stems.get(stemItalian(lemma)) ?? this.stems.get(stemItalian(token)) ?? null;
+      this.words.get(token) ??
+      this.words.get(lemma) ??
+      this.words.get(fold(token)) ??
+      this.stems.get(stemItalian(lemma)) ??
+      this.stems.get(stemItalian(token)) ??
+      null;
     return { lemma: entry ? (entry.lemma ?? entry.norm) : lemma, entry };
+  }
+
+  /** True when the dataset has a clip for exactly this word (function words are kept then). */
+  private hasOwnClip(token: string): boolean {
+    return this.words.has(token) || (!CLITICS.has(token) && this.words.has(fold(token)));
   }
 
   /** Words of the text in LIS order, with the face modifiers. */
@@ -345,7 +365,8 @@ export class LisRouter {
       const t = u;
       if (WH.has(t) && (endsQ || i === 0)) return void wh.push(this.lookup(t));
       if (NEG.has(t)) return void neg.push(this.lookup(t));
-      if (FUNCTION_WORDS.has(t) || ESSERE.has(t)) return;
+      // Function words are not signed, unless the dataset recorded a sign for them ("con", "o").
+      if ((FUNCTION_WORDS.has(t) && (CLITICS.has(t) || !this.hasOwnClip(t))) || ESSERE.has(t)) return;
       // "avere" before a past participle is an auxiliary ("ho mangiato").
       if (AVERE.has(t) && /(ato|uto|ito|ata|uta|ita|ati|uti|iti)$/.test(toks[i + 1] ?? '')) return;
       if (TIME.has(t)) return void time.push(this.lookup(t));
@@ -368,7 +389,11 @@ export class LisRouter {
     return { items: [...time, ...subj, ...obj, ...verb, ...neg, ...wh], modifiers };
   }
 
-  async translate(text: string): Promise<RouterResult> {
+  /**
+   * Routes an Italian text. `alsoMatch`: other texts for the semantic sentence match only
+   * (e.g. the original English, since the encoder is multilingual); the best accepted wins.
+   */
+  async translate(text: string, alsoMatch: string[] = []): Promise<RouterResult> {
     const norm = normalizeText(text);
     const empty: RouterResult = {
       mode: 'none', entries: [], score: 0, matchedLabel: null, matcher: 'lexical', order: [], skipped: [], modifiers: [],
@@ -377,8 +402,15 @@ export class LisRouter {
 
     let probe: Probe;
     if (this.exact.has(norm)) probe = { idx: this.exact.get(norm)!, score: 1, second: -1, guards: true, matcher: 'exact' };
-    else if (this.encoder && this.embeddings) probe = await this.semanticProbe(norm);
-    else probe = this.lexicalProbe(norm);
+    else if (this.encoder && this.embeddings) {
+      probe = await this.semanticProbe(norm);
+      for (const extra of alsoMatch) {
+        const p = await this.semanticProbe(normalizeText(extra));
+        // Guards compare numbers and negation with the Italian text.
+        p.guards = guardsOk(norm, this.entries[p.idx].norm);
+        if (this.accepts(p) && (!this.accepts(probe) || p.score > probe.score)) probe = p;
+      }
+    } else probe = this.lexicalProbe(norm);
 
     const best = this.entries[probe.idx];
     const base = { score: probe.score, matchedLabel: best.sentence, matcher: probe.matcher };

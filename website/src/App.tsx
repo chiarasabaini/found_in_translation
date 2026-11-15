@@ -1,41 +1,39 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { DictionaryPayload, SignAnimationPayload } from './types/lis';
+import type { SignAnimationPayload } from './types/lis';
 import { AvatarViewport } from './components/AvatarViewport';
 import { TranslatePanel, type TranslationResult } from './components/TranslatePanel';
 import { SettingsPanel } from './components/SettingsPanel';
-import { getSignLanguage, localizeClass, useLanguageSettings } from './i18n/languages';
+import { getSignLanguage, getSourceLanguage, useLanguageSettings } from './i18n/languages';
 import { useAvatarChoice } from './avatars/avatarCatalog';
 import { configuredModelUrl, HttpMotionModel, type GeneratedMotion, type MotionGenerator } from './generation/motionModel';
-import { MockMotionModel } from './generation/mockMotionModel';
 import { motionOutputFiles, motionToAnimation } from './generation/motionToAnimation';
 import type { TransitionCurve } from './generation/stitchClips';
 import { downloadText } from './utils/download';
 import { BASE_URL } from './utils/baseUrl';
-import { LisRouterModel, type SemanticState } from './router/lisRouterModel';
+import { LisRouterModel, type ModelState } from './router/lisRouterModel';
 import { loadBrowserEncoder } from './router/browserEncoder';
-
+import { loadBrowserTranslator } from './router/browserTranslator';
 
 const SEMANTIC_KEY = 'found-in-translation.semantic';
+/** Semantic sentence match: on unless the user turned it off. */
 const readSemanticPref = () => {
   try {
-    return localStorage.getItem(SEMANTIC_KEY) === 'on';
+    return localStorage.getItem(SEMANTIC_KEY) !== 'off';
   } catch {
-    return false;
+    return true;
   }
 };
 
 /**
  * Found in Translation: one page, like a text translator.
- * The phrase goes to the motion generator: the LIS router over the exported dataset
- * (public/lis/), a model server (VITE_MOTION_MODEL_URL), or the in-browser mock. Its output
- * (one clip per sign, or one recording) is joined and the avatar signs it.
+ * The phrase (translated to Italian in the browser when needed) goes to the LIS router over
+ * the exported dataset (public/lis/), or to a model server (VITE_MOTION_MODEL_URL). The clips
+ * are joined and the avatar signs them.
  */
 export default function App() {
   const [languages, setLanguages] = useLanguageSettings();
   const signLanguage = getSignLanguage(languages.signLanguage);
-
-  const [dictionary, setDictionary] = useState<DictionaryPayload | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const sourceLanguage = getSourceLanguage(languages.sourceLanguage);
 
   const [query, setQuery] = useState('');
   const [animation, setAnimation] = useState<SignAnimationPayload | null>(null);
@@ -50,25 +48,7 @@ export default function App() {
   const [avatar, setAvatar] = useAvatarChoice();
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [avatarInfo, setAvatarInfo] = useState('');
-
   const [showSkeleton, setShowSkeleton] = useState(false);
-
-  // Dictionary of the sign language: the vocabulary of the mock model.
-  useEffect(() => {
-    let cancelled = false;
-    setDictionary(null);
-    setLoadError(null);
-    fetch(signLanguage.dictionaryUrl)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Dictionary not found: ${signLanguage.dictionaryUrl}`);
-        return res.json() as Promise<DictionaryPayload>;
-      })
-      .then((d) => !cancelled && setDictionary(d))
-      .catch((err) => !cancelled && setLoadError(err instanceof Error ? err.message : 'Cannot load the app data'));
-    return () => {
-      cancelled = true;
-    };
-  }, [signLanguage.dictionaryUrl]);
 
   // New languages: the last phrase and result no longer apply.
   useEffect(() => {
@@ -78,39 +58,26 @@ export default function App() {
     setLastMotion(null);
   }, [languages.sourceLanguage, languages.signLanguage]);
 
-  const classes = useMemo(() => {
-    const base = dictionary?.metadata.base_language ?? 'it';
-    return (dictionary?.classes ?? []).map((c) => localizeClass(c, languages.sourceLanguage, base));
-  }, [dictionary, languages.sourceLanguage]);
-
-  // The exported dataset (public/lis/index.json), if the site has one.
+  // The exported dataset of the sign language (undefined while loading, null when missing).
   const [routerModel, setRouterModel] = useState<LisRouterModel | null | undefined>(undefined);
   useEffect(() => {
     let cancelled = false;
-    void LisRouterModel.load(BASE_URL).then((m) => !cancelled && setRouterModel(m));
+    setRouterModel(undefined);
+    void LisRouterModel.load(`${BASE_URL}${signLanguage.indexPath}`).then((m) => !cancelled && setRouterModel(m));
     return () => {
       cancelled = true;
     };
-  }, []);
-  useEffect(() => {
-    if (!routerModel || !dictionary) return;
-    const base = dictionary.metadata.base_language ?? 'it';
-    routerModel.setDictionary(
-      dictionary.classes.map((c) => localizeClass(c, base, base)),
-      (code) => dictionary.classes.map((c) => localizeClass(c, code, base)),
-    );
-  }, [routerModel, dictionary]);
+  }, [signLanguage.indexPath]);
 
-  // Model server when VITE_MOTION_MODEL_URL is set, else the LIS router, else the mock.
-  const generator: MotionGenerator = useMemo(() => {
+  // Model server when VITE_MOTION_MODEL_URL is set, else the LIS router.
+  const generator: MotionGenerator | null = useMemo(() => {
     const url = configuredModelUrl();
     if (url) return new HttpMotionModel(url);
-    if (routerModel) return routerModel;
-    return new MockMotionModel(classes);
-  }, [classes, routerModel]);
+    return routerModel ?? null;
+  }, [routerModel]);
 
-  // Optional semantic sentence match for the router (encoder downloaded once, ~120 MB).
-  const [semantic, setSemantic] = useState<SemanticState>({ status: 'off' });
+  // Semantic sentence match (multilingual encoder, ~120 MB downloaded once).
+  const [semantic, setSemantic] = useState<ModelState>({ status: 'off' });
   const enableSemantic = useCallback(
     async (on: boolean) => {
       if (!routerModel) return;
@@ -139,6 +106,33 @@ export default function App() {
     if (routerModel && readSemanticPref()) void enableSemantic(true);
   }, [routerModel, enableSemantic]);
 
+  // Translator to Italian for the source language (~130 MB downloaded once, then cached).
+  const [translator, setTranslator] = useState<ModelState>({ status: 'off' });
+  useEffect(() => {
+    const model = sourceLanguage.toItalianModel;
+    if (!routerModel || !model) {
+      setTranslator({ status: 'off' });
+      return;
+    }
+    if (routerModel.hasTranslator(sourceLanguage.code)) {
+      setTranslator({ status: 'on' });
+      return;
+    }
+    let cancelled = false;
+    setTranslator({ status: 'loading', fraction: null });
+    loadBrowserTranslator(model, (p) => !cancelled && setTranslator({ status: 'loading', fraction: p.fraction }))
+      .then((t) => {
+        routerModel.setTranslator(sourceLanguage.code, t);
+        if (!cancelled) setTranslator({ status: 'on' });
+      })
+      .catch((err) => {
+        if (!cancelled) setTranslator({ status: 'error', message: err instanceof Error ? err.message : 'Cannot load the translator' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [routerModel, sourceLanguage.code, sourceLanguage.toItalianModel]);
+
   /** Model output -> animation (per-sign clips are joined with the chosen transition curve). */
   const show = useCallback((text: string, motion: GeneratedMotion, curve: TransitionCurve) => {
     try {
@@ -148,6 +142,7 @@ export default function App() {
         segments: anim ? anim.segments : motion.segments,
         unmatched: motion.unmatched,
         empty: !anim,
+        italian: motion.route && motion.route.italian !== text ? motion.route.italian : null,
       });
       setError(null);
       if (anim) {
@@ -159,9 +154,12 @@ export default function App() {
     }
   }, []);
 
+  const needsTranslator = !!routerModel && generator === routerModel && !!sourceLanguage.toItalianModel;
+  const ready = !!generator && (!needsTranslator || translator.status === 'on');
+
   const handleTranslate = async () => {
     const text = query.trim();
-    if (!text || !dictionary) return;
+    if (!text || !generator || !ready) return;
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -189,6 +187,18 @@ export default function App() {
     if (lastMotion?.motion.clips?.length) show(lastMotion.text, lastMotion.motion, curve);
   };
 
+  // What the panel says while it cannot translate yet.
+  const status =
+    routerModel === undefined
+      ? 'Loading the LIS dataset…'
+      : !generator
+        ? 'No LIS dataset in this build. Export one with npm run export:lis (see the README).'
+        : needsTranslator && translator.status === 'loading'
+          ? `Loading the ${sourceLanguage.label} → Italian translator${translator.fraction !== null ? ` ${Math.round(translator.fraction * 100)}%` : '…'} (once, then cached)`
+          : needsTranslator && translator.status === 'error'
+            ? `Translator not available: ${translator.message}`
+            : null;
+
   return (
     <div className="h-dvh w-screen flex flex-col lg:flex-row overflow-hidden bg-[#E8EEF5] text-slate-900">
       {/* Left column: title, translator, settings */}
@@ -204,9 +214,11 @@ export default function App() {
             value={query}
             onChange={setQuery}
             onSubmit={() => void handleTranslate()}
-            busy={busy || !dictionary || routerModel === undefined}
+            busy={busy}
+            disabled={!ready}
+            status={status}
             result={result}
-            error={error ?? loadError}
+            error={error}
           />
         </div>
         <SettingsPanel
@@ -220,9 +232,9 @@ export default function App() {
           onToggleSkeleton={setShowSkeleton}
           transitionCurve={transitionCurve}
           onChangeTransitionCurve={handleChangeCurve}
-          modelName={generator.name}
-          isMockModel={generator.isMock}
-          semantic={generator === routerModel ? semantic : null}
+          modelName={generator?.name ?? 'No LIS dataset'}
+          isMockModel={generator?.isMock ?? false}
+          semantic={generator && generator === routerModel ? semantic : null}
           onToggleSemantic={(on) => void enableSemantic(on)}
           lastRoute={lastMotion?.motion.route ?? null}
           outputFiles={lastMotion ? motionOutputFiles(lastMotion.motion) : []}
