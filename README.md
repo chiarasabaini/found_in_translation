@@ -42,8 +42,11 @@ We record real LIS signers with **Rokoko Smartgloves** (fingers and hands) and c
 
 # Requirements
 
-- Rokoko Gloves
-- Node.js (for the website)
+| Part | Needs |
+|---|---|
+| Dataset capture ([`dataset/`](dataset/)) | Rokoko Smartgloves and the [Rokoko Device SDK](dataset/README.md#files-not-in-the-repository), two cameras (face and body), Python 3 with `numpy`, `opencv-python`, `mediapipe` |
+| Router ([`model/`](model/)) | Python 3.9+, `sentence-transformers`, `spacy` with an Italian model (`python model/installer.py`) |
+| Website ([`website/`](website/)) | Node.js 20.19+ (Vite 8) |
 
 ---
 

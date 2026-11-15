@@ -525,7 +525,7 @@ def render_live_studio_frame(
             2,
         )
         meta_label = (
-            f"FRASE [{p_idx + 1}/{p_total}]  |  Takes registrati per questa frase: {takes}"
+            f"SENTENCE [{p_idx + 1}/{p_total}]  |  Takes recorded for this sentence: {takes}"
         )
         cv2.putText(
             canvas,
@@ -712,7 +712,7 @@ def render_playback_studio_frame(
         display_sentence = sentence if len(sentence) <= 58 else sentence[:55] + "..."
         cv2.putText(
             canvas,
-            f'FRASE: "{display_sentence}"',
+            f'SENTENCE: "{display_sentence}"',
             (28, 86),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.70,

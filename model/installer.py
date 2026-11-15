@@ -1,17 +1,17 @@
 """
-installer.py - installa tutto il necessario per lis_router.py.
+installer.py - installs everything lis_router.py needs.
 
-Esegue, con l'interprete Python corrente (quindi dentro il venv attivo):
+Runs with the current Python interpreter (so inside the active venv):
   1. pip install sentence-transformers spacy numpy
-  2. python -m spacy download <modello spaCy>
-  3. scarica in anticipo il modello del sentence encoder (cache di Hugging Face),
-     cosi' la prima query non resta in attesa del download
+  2. python -m spacy download <spaCy model>
+  3. downloads the sentence encoder model in advance (Hugging Face cache),
+     so the first query does not wait for the download
 
-Uso:
+Usage:
   python installer.py
   python installer.py --spacy-model it_core_news_md
   python installer.py --st-model sentence-transformers/paraphrase-multilingual-mpnet-base-v2
-  python installer.py --skip-model-download      # solo librerie + spaCy
+  python installer.py --skip-model-download      # libraries + spaCy only
 """
 from __future__ import annotations
 
@@ -32,13 +32,13 @@ def main() -> int:
     ap.add_argument("--spacy-model", default="it_core_news_sm",
                     help="it_core_news_sm | _md | _lg (default: it_core_news_sm)")
     ap.add_argument("--st-model", default="intfloat/multilingual-e5-base",
-                    help="modello sentence-transformers (default: intfloat/multilingual-e5-base)")
+                    help="sentence-transformers model (default: intfloat/multilingual-e5-base)")
     ap.add_argument("--skip-model-download", action="store_true",
-                    help="non pre-scaricare il modello del sentence encoder")
+                    help="do not download the sentence encoder model in advance")
     args = ap.parse_args()
 
     if sys.version_info < (3, 9):
-        print("Serve Python 3.9 o superiore.", file=sys.stderr)
+        print("Python 3.9 or later is required.", file=sys.stderr)
         return 1
 
     try:
@@ -47,17 +47,17 @@ def main() -> int:
         run([sys.executable, "-m", "spacy", "download", args.spacy_model])
 
         if not args.skip_model_download:
-            print(f"\nScarico il modello {args.st_model} ...", flush=True)
+            print(f"\nDownloading the model {args.st_model} ...", flush=True)
             from sentence_transformers import SentenceTransformer
             SentenceTransformer(args.st_model)
     except subprocess.CalledProcessError as e:
-        print(f"\nComando fallito (codice {e.returncode}): {' '.join(map(str, e.cmd))}", file=sys.stderr)
+        print(f"\nCommand failed (exit code {e.returncode}): {' '.join(map(str, e.cmd))}", file=sys.stderr)
         return e.returncode or 1
-    except Exception as e:  # download del modello, rete, ecc.
-        print(f"\nErrore: {e}", file=sys.stderr)
+    except Exception as e:  # model download, network, etc.
+        print(f"\nError: {e}", file=sys.stderr)
         return 1
 
-    print("\nInstallazione completata. Prova con:")
+    print("\nInstallation complete. Try:")
     print('  python lis_router.py query DATASET_ROOT "il treno parte alle 19"')
     return 0
 

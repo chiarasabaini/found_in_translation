@@ -1,28 +1,28 @@
 """
-lis_router.py - dal testo italiano ai path delle animazioni LIS.
+lis_router.py - from Italian text to the paths of the LIS animations.
 
-Flusso:
-  1. best match semantico (sentence encoder) tra l'input e le frasi del dataset
-     - score >= tau, margine sul secondo candidato, guardie su negazione e numeri
-     -> mode="sentence", paths=[cartella del campione]
-  2. altrimenti: spaCy (POS + lemma) -> riordino in ordine LIS -> lookup delle
-     singole parole nel dataset (le mancanti vengono saltate)
-     -> mode="words", paths=[cartelle in ordine], modifiers=[...]
-  3. nessuna parola trovata -> mode="none"
+Flow:
+  1. best semantic match (sentence encoder) between the input and the dataset sentences
+     - score >= tau, margin over the second candidate, guards on negation and numbers
+     -> mode="sentence", paths=[sample folder]
+  2. otherwise: spaCy (POS + lemma) -> reorder into LIS order -> look up the
+     single words in the dataset (missing words are skipped)
+     -> mode="words", paths=[folders in order], modifiers=[...]
+  3. no word found -> mode="none"
 
-Layout del dataset atteso (come il campione di esempio):
-  <root>/<qualsiasi sottocartella>/<sample_id>/metadata.json   (campo "sentence")
-                                              /left_hand.csv, right_hand.csv, face.csv, body.csv
-Il "path dell'animazione" restituito e' la cartella del campione.
+Expected dataset layout (as in the sample):
+  <root>/<any subfolder>/<sample_id>/metadata.json   ("sentence" field)
+                                   /left_hand.csv, right_hand.csv, face.csv, body.csv
+The returned "animation path" is the sample folder.
 
-Clip delle singole parole: sono i campioni la cui "sentence" e' una sola parola.
-Override opzionali in metadata.json: "type": "word" | "sentence", "lemma": "<lemma>".
+Single-word clips are the samples whose "sentence" is one word.
+Optional overrides in metadata.json: "type": "word" | "sentence", "lemma": "<lemma>".
 
-Dipendenze:
+Dependencies:
   pip install sentence-transformers spacy numpy
-  python -m spacy download it_core_news_sm      # meglio _md o _lg per i lemmi
+  python -m spacy download it_core_news_sm      # _md or _lg give better lemmas
 
-Uso:
+Usage:
   python lis_router.py query DATASET_ROOT "il treno parte alle 19"
   python lis_router.py calibrate DATASET_ROOT calibration.json
 """
@@ -39,16 +39,16 @@ from pathlib import Path
 import numpy as np
 
 # ----------------------------------------------------------------------------
-# Lessici
+# Italian lexicons (data: keep them in Italian)
 # ----------------------------------------------------------------------------
 NEG = {"non", "mai", "niente", "nulla", "nessuno", "nessuna", "senza"}
 WH = {"chi", "che", "cosa", "dove", "quando", "perché", "perche", "come", "quanto", "quale", "quali"}
 TIME = {"ieri", "oggi", "domani", "dopodomani", "adesso", "ora", "stasera", "stamattina",
         "mattina", "pomeriggio", "sera", "notte"}
 DROP_POS = {"DET", "AUX", "ADP", "CCONJ", "SCONJ", "PART"}
-DROP_LEMMAS = {"essere"}  # copula assente in LIS
+DROP_LEMMAS = {"essere"}  # LIS has no copula
 
-# Niente "uno/una/sei": sono anche articolo / verbo e darebbero falsi positivi.
+# No "uno/una/sei": they are also an article / a verb and would give false positives.
 NUMBER_WORDS = {
     "zero": 0, "due": 2, "tre": 3, "quattro": 4, "cinque": 5, "sette": 7,
     "otto": 8, "nove": 9, "dieci": 10, "undici": 11, "dodici": 12, "tredici": 13,
@@ -83,7 +83,7 @@ def _has_neg(norm: str) -> bool:
 
 
 # ----------------------------------------------------------------------------
-# Strutture dati
+# Data structures
 # ----------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Entry:
@@ -106,11 +106,11 @@ class Probe:
 class Result:
     mode: str                                   # "sentence" | "words" | "none"
     paths: list[str] = field(default_factory=list)
-    score: float = 0.0                          # miglior similarita' trovata
-    matched_label: str | None = None            # frase del dataset migliore (anche se scartata)
-    order: list[str] = field(default_factory=list)      # lemmi in ordine LIS (solo "words")
-    skipped: list[str] = field(default_factory=list)    # lemmi senza clip
-    modifiers: list[str] = field(default_factory=list)  # canali facciali da sovrapporre
+    score: float = 0.0                          # best similarity found
+    matched_label: str | None = None            # best dataset sentence (also when rejected)
+    order: list[str] = field(default_factory=list)      # lemmas in LIS order ("words" only)
+    skipped: list[str] = field(default_factory=list)    # lemmas without a clip
+    modifiers: list[str] = field(default_factory=list)  # face channels to overlay
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False, indent=2)
@@ -141,9 +141,9 @@ class LisRouter:
                  tau: float = 0.88, margin: float = 0.02,
                  min_coverage: float = 0.0):
         """
-        tau           soglia di coseno per accettare il match di frase intera
-        margin        distacco minimo tra il primo e il miglior candidato *diverso*
-        min_coverage  frazione minima di parole trovate nel fallback (0 = basta una)
+        tau           cosine threshold to accept a whole-sentence match
+        margin        minimum gap between the first and the best *different* candidate
+        min_coverage  minimum fraction of words found in the fallback (0 = one is enough)
         """
         import spacy
         from sentence_transformers import SentenceTransformer
@@ -152,7 +152,7 @@ class LisRouter:
         self.tau, self.margin, self.min_coverage = tau, margin, min_coverage
         self.entries = load_dataset(self.root)
         if not self.entries:
-            raise ValueError(f"Nessun metadata.json valido sotto {self.root}")
+            raise ValueError(f"No valid metadata.json under {self.root}")
 
         self.nlp = spacy.load(spacy_model)
         self.model_name = model
@@ -167,7 +167,7 @@ class LisRouter:
         self.emb = self._embeddings()
         self.words = self._build_word_index()
 
-    # ---------------- indici ----------------
+    # ---------------- indexes ----------------
     def _embeddings(self) -> np.ndarray:
         key = hashlib.sha256(
             (self.model_name + "\x00" + "\x00".join(e.norm for e in self.entries)).encode()
@@ -185,7 +185,7 @@ class LisRouter:
         try:
             np.savez(cache, key=key, emb=emb)
         except OSError:
-            pass  # dataset in sola lettura: niente cache
+            pass  # read-only dataset: no cache
         return emb
 
     def _build_word_index(self) -> dict[str, Path]:
@@ -195,14 +195,14 @@ class LisRouter:
             if not is_word or e.kind == "sentence":
                 continue
             lemma = (e.lemma or self.nlp(e.norm)[0].lemma_).lower()
-            words.setdefault(lemma, e.path)      # a parita' di chiave vince il primo
+            words.setdefault(lemma, e.path)      # same key: the first sample wins
             words.setdefault(e.norm, e.path)
         return words
 
-    # ---------------- 1) match semantico ----------------
+    # ---------------- 1) semantic match ----------------
     @staticmethod
     def _guards_ok(a: str, b: str) -> bool:
-        """Gli embedding confondono 'vado' / 'non vado' e 'alle 19' / 'alle 20'."""
+        """Embeddings confuse 'vado' / 'non vado' and 'alle 19' / 'alle 20'."""
         return _has_neg(a) == _has_neg(b) and _numbers(a) == _numbers(b)
 
     def _probe(self, norm: str) -> Probe:
@@ -212,7 +212,7 @@ class LisRouter:
                                 show_progress_bar=False)[0]
         sims = self.emb @ q
         i = int(np.argmax(sims))
-        other = self.norms != self.entries[i].norm   # ignora le altre take della stessa frase
+        other = self.norms != self.entries[i].norm   # ignore the other takes of the same sentence
         second = float(sims[other].max()) if other.any() else -1.0
         return Probe(i, float(sims[i]), second, self._guards_ok(norm, self.entries[i].norm))
 
@@ -221,7 +221,7 @@ class LisRouter:
         margin = self.margin if margin is None else margin
         return p.guards_ok and p.score >= tau and (p.score - p.second) >= margin
 
-    # ---------------- 2) fallback: POS -> ordine LIS ----------------
+    # ---------------- 2) fallback: POS -> LIS order ----------------
     def _lis_order(self, raw: str) -> tuple[list[tuple[str, str]], list[str]]:
         doc = self.nlp(raw)
         ends_q = raw.strip().endswith("?")
@@ -256,7 +256,7 @@ class LisRouter:
             mods.append("question_wh")
         elif ends_q:
             mods.append("question_yn")
-        # tempo -> soggetto -> altro -> oggetto -> verbo -> negazione -> interrogativo
+        # time -> subject -> other -> object -> verb -> negation -> question word
         return time_ + subj + rest + obj + verb + neg + wh, mods
 
     # ---------------- API ----------------
@@ -285,17 +285,17 @@ class LisRouter:
             return Result("none", [], p.score, entry.sentence, [l for l, _ in order], skipped, mods)
         return Result("words", paths, p.score, entry.sentence, used, skipped, mods)
 
-    # ---------------- calibrazione soglia ----------------
+    # ---------------- threshold calibration ----------------
     def calibrate(self, cases: list[dict]) -> None:
-        """cases: [{"text": "...", "expected": "frase del dataset" | null}, ...]
-        expected=null significa 'non deve matchare nessuna frase'."""
+        """cases: [{"text": "...", "expected": "dataset sentence" | null}, ...]
+        expected=null means 'must not match any sentence'."""
         probes = []
         for c in cases:
             p = self._probe(normalize(c["text"]))
             exp = normalize(c["expected"]) if c.get("expected") else None
             probes.append((p, exp, self.entries[p.idx].norm))
         n_pos = sum(1 for _, e, _ in probes if e)
-        print(f"{'tau':>5} {'accettati':>9} {'TP':>4} {'FP':>4} {'precision':>9} {'recall':>7}")
+        print(f"{'tau':>5} {'accepted':>9} {'TP':>4} {'FP':>4} {'precision':>9} {'recall':>7}")
         for tau in np.arange(0.70, 1.0001, 0.01):
             tp = fp = acc = 0
             for p, exp, top in probes:
@@ -308,8 +308,8 @@ class LisRouter:
             prec = tp / acc if acc else 1.0
             rec = tp / n_pos if n_pos else 0.0
             print(f"{tau:5.2f} {acc:9d} {tp:4d} {fp:4d} {prec:9.2f} {rec:7.2f}")
-        print("\nScegli il tau piu' basso con precision ~1.00: i falsi positivi (animazione "
-              "sbagliata) costano piu' dei falsi negativi (cade nel fallback).")
+        print("\nPick the lowest tau with precision ~1.00: false positives (wrong animation) "
+              "cost more than false negatives (they fall back to the word lookup).")
 
 
 if __name__ == "__main__":

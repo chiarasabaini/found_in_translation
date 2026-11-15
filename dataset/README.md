@@ -14,6 +14,17 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### Files not in the repository
+
+`config/`, `examples/`, `models/` and the output folders are in [`.gitignore`](./.gitignore). Before the first run:
+
+| Path | What to put there |
+| :--- | :--- |
+| `examples/solver_core/` | The Rokoko hand solver package from the Rokoko Device SDK: copy or link `<sdk>/examples/python/solver_core` (the installer puts the SDK in `~/.local/share/rokoko-device-sdk`). [`core/gloves_tracker.py`](./core/gloves_tracker.py) imports it. |
+| `config/config.json` | Optional. Mannequin proportions; without it the built-in defaults (or `--height`) are used. |
+| `config/prompts.txt` | Optional. One Italian sentence per line for the Teleprompter (or pass `--prompts`). |
+| `models/` | Nothing: the MediaPipe `face_landmarker.task` and `pose_landmarker_lite.task` models are downloaded there on the first run. |
+
 ---
 
 ## 2. Hardware Architecture (Parallel Multi-Threaded Pipeline)
