@@ -28,7 +28,7 @@ import {
   type Quat,
   type Vec3,
 } from '../recording/math3d';
-import type { GeneratedMotion, GlossSegment, MotionGenerator, MotionRequest } from './motionModel';
+import type { GeneratedClip, GeneratedMotion, GlossSegment, MotionGenerator, MotionRequest } from './motionModel';
 
 type Side = 'right' | 'left';
 
@@ -549,14 +549,37 @@ export function synthesizeRecording(signs: PlannedSign[]): { files: RecordingFil
   };
 }
 
+/** One rest-to-rest clip per sign, as the real model returns them. */
+export function synthesizeSignClips(signs: PlannedSign[]): GeneratedClip[] {
+  return signs.map((s) => {
+    const { files, segments } = synthesizeRecording([s]);
+    return {
+      text: s.text,
+      gloss: glossOf(s.cls),
+      classId: s.cls.id,
+      files,
+      strokeStartSec: segments[0].startSec,
+      strokeEndSec: segments[0].endSec,
+    };
+  });
+}
+
+export type MockOutput = 'clips' | 'continuous';
+
 export class MockMotionModel implements MotionGenerator {
   readonly name = 'Mock motion model v0 (in-browser placeholder)';
   readonly isMock = true;
   private readonly classes: DictionaryClass[];
+  private readonly output: MockOutput;
 
-  /** `classes` must carry the text of the request's source language. */
-  constructor(classes: DictionaryClass[]) {
+  /**
+   * `classes` must carry the text of the request's source language.
+   * `output`: 'clips' (default) returns one clip per sign, like the real model;
+   * 'continuous' returns the whole phrase as one recording.
+   */
+  constructor(classes: DictionaryClass[], output: MockOutput = 'clips') {
     this.classes = classes;
+    this.output = output;
   }
 
   async generate(request: MotionRequest, signal?: AbortSignal): Promise<GeneratedMotion> {
@@ -566,6 +589,17 @@ export class MockMotionModel implements MotionGenerator {
     const { signs, unmatched } = planSigns(request.text, this.classes);
     if (!signs.length) {
       return { files: [], segments: [], unmatched, model: this.name };
+    }
+    if (this.output === 'clips') {
+      const clips = synthesizeSignClips(signs);
+      const segments: GlossSegment[] = clips.map((c) => ({
+        text: c.text,
+        gloss: c.gloss,
+        classId: c.classId,
+        startSec: c.strokeStartSec ?? 0,
+        endSec: c.strokeEndSec ?? 0,
+      }));
+      return { files: [], clips, segments, unmatched, model: this.name };
     }
     const { files, segments } = synthesizeRecording(signs);
     return { files, segments, unmatched, model: this.name };

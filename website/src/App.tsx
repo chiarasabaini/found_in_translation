@@ -14,10 +14,10 @@ import { deleteRecordedClip, downloadText, loadRecordedClips, saveRecordedClip }
 import { getSignLanguage, localizeClass, useLanguageSettings } from './i18n/languages';
 import { useAvatarChoice } from './avatars/avatarCatalog';
 import type { GenerationResult, InterpreterMode } from './components/PhraseInputPanel';
-import { configuredModelUrl, HttpMotionModel, type MotionGenerator } from './generation/motionModel';
+import { configuredModelUrl, HttpMotionModel, type GeneratedMotion, type MotionGenerator } from './generation/motionModel';
+import { motionToAnimation } from './generation/motionToAnimation';
+import type { TransitionCurve } from './generation/stitchClips';
 import { MockMotionModel } from './generation/mockMotionModel';
-import { parseRokokoRecording } from './recording/rokokoRecording';
-import { DEFAULT_RETARGET_OPTIONS, retargetRecording } from './recording/recordingRetarget';
 
 // Secondary views load on first use, so the interpreter starts faster.
 const QaComparisonView = lazy(() => import('./components/QaComparisonView').then((m) => ({ default: m.QaComparisonView })));
@@ -53,6 +53,10 @@ export default function App() {
   interpreterModeRef.current = interpreterMode;
   const [generating, setGenerating] = useState(false);
   const [generation, setGeneration] = useState<GenerationResult | null>(null);
+  const [transitionCurve, setTransitionCurve] = useState<TransitionCurve>('quintic');
+  const transitionCurveRef = useRef(transitionCurve);
+  transitionCurveRef.current = transitionCurve;
+  const lastMotionRef = useRef<{ text: string; motion: GeneratedMotion } | null>(null);
   const generationAbortRef = useRef<AbortController | null>(null);
 
   const [avatar, setAvatar] = useAvatarChoice();
@@ -150,6 +154,7 @@ export default function App() {
     setQuery('');
     setMatchResult(null);
     setGeneration(null);
+    lastMotionRef.current = null;
   }, [languages.sourceLanguage, languages.signLanguage]);
 
   // Dictionary text in the source language; durations of recorded clips where present.
@@ -185,6 +190,16 @@ export default function App() {
     return url ? new HttpMotionModel(url) : new MockMotionModel(classes);
   }, [classes]);
 
+  /** Shows the animation built from a model output (stitching per-sign clips if needed). */
+  const showMotion = useCallback((text: string, motion: GeneratedMotion, curve: TransitionCurve, autoPlay: boolean) => {
+    const anim = motionToAnimation(motion, text, curve);
+    setGeneration({ text, motion: anim ? { ...motion, segments: anim.segments } : motion });
+    if (!anim) return;
+    setActiveClassId(null);
+    setActiveAnimation(anim.payload);
+    if (autoPlay) setPlayTrigger((n) => n + 1);
+  }, []);
+
   /** Text -> motion model -> recording-format CSV -> same import and retargeting as real recordings. */
   const handleGenerate = async (text: string) => {
     if (!text.trim()) return;
@@ -199,24 +214,8 @@ export default function App() {
         ctrl.signal,
       );
       if (ctrl.signal.aborted) return;
-      setGeneration({ text, motion });
-      if (!motion.files.length) return;
-      const rec = parseRokokoRecording(motion.files, 'generated');
-      const error = rec.diagnostics.find((d) => d.level === 'error');
-      if (error) throw new Error(`Model output not valid: ${error.message}`);
-      const { payload } = retargetRecording(rec, {
-        ...DEFAULT_RETARGET_OPTIONS,
-        startSec: 0,
-        endSec: rec.durationSec,
-        classId: 'generated',
-        phrase: text,
-        category: 'Generated',
-        description: motion.segments.map((s) => s.gloss).join(' · '),
-      });
-      payload.prototypeClipId = motion.model;
-      setActiveClassId(null);
-      setActiveAnimation(payload);
-      setPlayTrigger((n) => n + 1);
+      lastMotionRef.current = { text, motion };
+      showMotion(text, motion, transitionCurveRef.current, true);
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') return;
       setLoadError(err instanceof Error ? err.message : 'Motion generation failed');
@@ -224,6 +223,17 @@ export default function App() {
       if (generationAbortRef.current === ctrl) setGenerating(false);
     }
   };
+
+  // A new transition curve re-joins the last model output (no new request to the model).
+  useEffect(() => {
+    const last = lastMotionRef.current;
+    if (!last?.motion.clips?.length) return;
+    try {
+      showMotion(last.text, last.motion, transitionCurve, true);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Cannot join the model clips');
+    }
+  }, [transitionCurve, showMotion]);
 
   const handleSubmitQuery = (textOverride?: string) => {
     if (!dictionary) return;
@@ -324,6 +334,8 @@ export default function App() {
             generating={generating}
             generation={generation}
             onDownloadFile={(name, text) => downloadText(name, text)}
+            transitionCurve={transitionCurve}
+            onChangeTransitionCurve={setTransitionCurve}
           />
           <section aria-label="3D avatar viewport" className="flex-1 min-h-[420px] lg:h-full relative">
             <AvatarViewport

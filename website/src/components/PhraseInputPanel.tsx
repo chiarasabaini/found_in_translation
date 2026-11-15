@@ -3,6 +3,8 @@ import { Send, AlertCircle, CheckCircle2, Download, Loader2 } from 'lucide-react
 import type { DictionaryClass, MatchResult, SignAnimationPayload } from '../types/lis';
 import { getSourceLanguage } from '../i18n/languages';
 import type { GeneratedMotion } from '../generation/motionModel';
+import { motionOutputFiles } from '../generation/motionToAnimation';
+import type { TransitionCurve } from '../generation/stitchClips';
 
 export type InterpreterMode = 'model' | 'dictionary';
 
@@ -34,6 +36,9 @@ interface PhraseInputPanelProps {
   generating: boolean;
   generation: GenerationResult | null;
   onDownloadFile: (name: string, text: string) => void;
+  /** Curve of the transitions between per-sign clips. */
+  transitionCurve: TransitionCurve;
+  onChangeTransitionCurve: (curve: TransitionCurve) => void;
 }
 
 const MODES: ReadonlyArray<readonly [InterpreterMode, string]> = [
@@ -61,8 +66,12 @@ export const PhraseInputPanel: React.FC<PhraseInputPanelProps> = ({
   generating,
   generation,
   onDownloadFile,
+  transitionCurve,
+  onChangeTransitionCurve,
 }) => {
   const source = getSourceLanguage(sourceLanguage);
+  const outputFiles = generation ? motionOutputFiles(generation.motion) : [];
+  const hasClips = !!generation?.motion.clips?.length;
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSubmitQuery();
@@ -155,10 +164,10 @@ export const PhraseInputPanel: React.FC<PhraseInputPanelProps> = ({
                 Not signed (no {signLanguage} sign yet): {generation.motion.unmatched.join(', ')}
               </p>
             )}
-            {generation.motion.files.length === 0 && (
+            {outputFiles.length === 0 && (
               <p className="text-xs text-amber-800">The model produced no motion for this phrase.</p>
             )}
-            {generation.motion.files.length > 0 && (
+            {outputFiles.length > 0 && (
               <details className="group text-xs text-slate-500">
                 <summary className="cursor-pointer select-none hover:text-slate-800" title={modelName}>
                   Model output files
@@ -168,8 +177,22 @@ export const PhraseInputPanel: React.FC<PhraseInputPanelProps> = ({
                     </span>
                   )}
                 </summary>
+                {hasClips && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <label htmlFor="transition-curve">Transitions between signs</label>
+                    <select
+                      id="transition-curve"
+                      value={transitionCurve}
+                      onChange={(e) => onChangeTransitionCurve(e.target.value as TransitionCurve)}
+                      className="rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-xs text-slate-900 cursor-pointer"
+                    >
+                      <option value="quintic">Quintic (minimum jerk)</option>
+                      <option value="cubic">Cubic Hermite</option>
+                    </select>
+                  </div>
+                )}
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {generation.motion.files.map((f) => (
+                  {outputFiles.map((f) => (
                     <button
                       key={f.name}
                       type="button"

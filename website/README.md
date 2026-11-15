@@ -52,7 +52,7 @@ Retargeting method (`src/recording/recordingRetarget.ts`): bone directions from 
 
 In the **Interpreter**, the default mode is **Motion model**: the typed phrase goes to a text-to-motion model, the model returns recording-format files, and the site animates the avatar with the same import and retargeting used for real recordings. **Dictionary** mode keeps the old behavior (closed dictionary → stored animation) and lists the dictionary phrases. In model mode the panel shows only the prompt and, after signing, the gloss sequence, the words not signed and the model output files.
 
-The real model does not exist yet. Until then, `src/generation/mockMotionModel.ts` plays its role in the browser: it splits the phrase into dictionary signs and synthesizes the CSV files at 30 Hz from placeholder handshapes, the dictionary anchors and motion arcs, and arm IK. **The mock handshapes are not validated LIS signs.** The interpreter shows the gloss sequence, the words it could not sign, and buttons to download the generated CSV files.
+The real model does not exist yet. Until then, `src/generation/mockMotionModel.ts` plays its role in the browser: it splits the phrase into dictionary signs and synthesizes one rest-to-rest clip per sign (CSV files at 30 Hz) from placeholder handshapes, the dictionary anchors and motion arcs, and arm IK, as the real model will. **The mock handshapes are not validated LIS signs.** The interpreter shows the gloss sequence, the words it could not sign, and buttons to download the generated CSV files.
 
 To use the real model, set `VITE_MOTION_MODEL_URL` at build time (see `.env.example`).
 
@@ -76,12 +76,44 @@ POST <VITE_MOTION_MODEL_URL>
 }
 ```
 
+Instead of `files` (one continuous recording of the phrase), the model can return one clip per sign. Each clip starts and ends at rest; the site joins them (see "Joining per-sign clips" below):
+
+```
+{
+  "clips": [
+    {"text": "hello", "gloss": "CIAO", "classId": "ciao", "strokeStartSec": 0.35, "strokeEndSec": 1.85,
+     "files": [{"name": "right_hand.csv", "text": "..."}, {"name": "left_hand.csv", "text": "..."}, ...]},
+    {"text": "how are you", "gloss": "COME-STAI", "classId": "come_stai", "files": [...]}
+  ],
+  "unmatched": [],
+  "model": "my-model v1"
+}
+```
+
+`strokeStartSec` / `strokeEndSec` mark the sign inside the clip (after leaving rest, before returning). They are optional: when missing, the site detects them from the arm motion.
+
 File contract (same as the "Real recordings" table above):
 
 - `left_hand.csv`, `right_hand.csv` are required. `timestamp_ms` is required and shared by all files. Joint positions (`<Side><Joint>_pos_x/y/z`, meters, Y-up, right-handed, signer facing +Z, `ForeArm` at the origin) are required; `_rot_*` columns are optional and not used.
 - `body.csv` is strongly recommended: without shoulders and elbows the hand position relative to the body is only estimated, and in LIS location changes meaning.
 - `face.csv` is optional: ARKit blendshapes `bs_<name>` and the landmarks `face_1`, `face_10`, `face_33`, `face_152`, `face_263` for head rotation are enough.
 - `segments`, `unmatched` and `model` are optional; they only feed the UI.
+
+### Joining per-sign clips
+
+`src/generation/stitchClips.ts` turns the per-sign clips into one animation:
+
+1. Each clip is retargeted on its own (one glove yaw for all clips).
+2. The stroke of every sign is kept unchanged, plus the lead-in of the first sign and the lead-out of the last one. The rest pose between signs is removed.
+3. Each gap gets a transition from the end pose of sign A to the start pose of sign B. It matches pose and velocity (and acceleration, with the quintic curve) at both ends:
+   - bone rotations: Hermite curve on the rotation vector, `q(t) = q0 · exp(h(t))`; the end velocity goes through the inverse right Jacobian of SO(3), so the angular velocity matches at both joins;
+   - blendshapes: scalar Hermite curve, clamped to [0, 1].
+4. The transition time comes from the largest arm rotation (0.15–0.6 s), and it is long enough that no bone goes faster than 7 rad/s (arms) or 12 rad/s (fingers, head) at its peak.
+5. A hand that is idle in a sign between two signs that use it does not drop to rest: one long transition bridges it.
+
+Curves: **Quintic (minimum jerk)**, the default, is C2 and gives the bell-shaped speed profile of human reaching movements; **Cubic Hermite** is C1. Pick one under "Model output files" in the interpreter to compare them on the same output, without a new model request.
+
+Limit: the transitions are smooth but neutral. Real coarticulation (the handshape of B forming during A) needs a model trained on continuous phrases or a motion in-betweening network.
 
 Training data notes: normalize the glove yaw of each recording first (the gloves are referenced to magnetic north; `estimateGloveYawDeg` in `src/recording/recordingRetarget.ts` gives the estimate the site uses), and record the gloves at full rate (83 Hz) when possible.
 
@@ -112,7 +144,7 @@ python3 -m pipeline.run_pipeline --dataset data/real --out public/data
 
 ```bash
 npm install
-npm test        # recording import, matcher, clip builder, languages
+npm test        # recording import, matcher, clip builder, languages, mock model, face rig, clip joining
 npm run lint
 npm run build
 npm run dev

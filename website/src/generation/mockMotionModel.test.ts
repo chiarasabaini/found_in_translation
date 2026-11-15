@@ -22,7 +22,7 @@ test('planSigns splits a phrase into dictionary signs', () => {
 });
 
 test('mock model output goes through the real recording import and retargeting', async () => {
-  const model = new MockMotionModel(en);
+  const model = new MockMotionModel(en, 'continuous');
   const out = await model.generate({ text: 'Hello, how are you?', sourceLanguage: 'en', signLanguage: 'LIS' });
   assert.deepEqual(out.segments.map((s) => s.gloss), ['CIAO', 'COME-STAI']);
   assert.equal(out.files.length, 4);
