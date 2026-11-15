@@ -50,8 +50,16 @@ def run_player(
 
     already_proc = _is_already_postprocessed(session_dir)
     if already_proc:
-        raw_sibling = DEFAULT_OUTPUT_DIR / session_name
-        if (raw_sibling / "face.csv").exists():
+        raw_candidates = [
+            DEFAULT_OUTPUT_DIR / "row" / session_dir.parent.name / session_name,
+            DEFAULT_OUTPUT_DIR / "row" / session_name,
+            DEFAULT_OUTPUT_DIR / session_dir.parent.name / session_name,
+            DEFAULT_OUTPUT_DIR / session_name,
+        ]
+        raw_sibling = next(
+            (c for c in raw_candidates if (c / "face.csv").exists()), None
+        )
+        if raw_sibling is not None:
             raw_frames, _, _ = load_session(raw_sibling)
         else:
             raw_frames = loaded_frames

@@ -1,0 +1,29 @@
+sample_id,prompt_index,sentence,num_frames,duration_ms,avg_fps,created_at,session_dir
+a_che_ora_e_il_treno_20261115_000402,11,a che ora è il treno?,203,6733,30.15,2026-11-15T04:11:14,a_che_ora_e_il_treno_20261115_000402
+a_che_ora_e_il_treno_20261115_002826,11,a che ora è il treno?,182,6033,30.17,2026-11-15T04:11:15,a_che_ora_e_il_treno_20261115_002826
+ciao_mi_chiamo_chiara_20261114_233923,0,ciao mi chiamo Chiara,310,10300,30.1,2026-11-15T04:11:16,ciao_mi_chiamo_chiara_20261114_233923
+ciao_mi_chiamo_chiara_20261115_001833,0,ciao mi chiamo Chiara,301,10000,30.1,2026-11-15T04:11:17,ciao_mi_chiamo_chiara_20261115_001833
+con_chi_vieni_all_aperitivo_20261114_234824,3,con chi vieni all'aperitivo?,273,9067,30.11,2026-11-15T04:11:17,con_chi_vieni_all_aperitivo_20261114_234824
+con_chi_vieni_all_aperitivo_20261115_002155,3,con chi vieni all'aperitivo?,258,8567,30.12,2026-11-15T04:11:18,con_chi_vieni_all_aperitivo_20261115_002155
+cosa_fai_domani_20261114_235022,4,cosa fai domani?,149,4933,30.2,2026-11-15T04:11:19,cosa_fai_domani_20261114_235022
+cosa_fai_domani_20261115_002233,4,cosa fai domani?,146,4833,30.21,2026-11-15T04:11:19,cosa_fai_domani_20261115_002233
+dove_abiti_20261114_235209,5,dove abiti?,139,4600,30.22,2026-11-15T04:11:19,dove_abiti_20261114_235209
+dove_abiti_20261115_002307,5,dove abiti?,153,5067,30.2,2026-11-15T04:11:20,dove_abiti_20261115_002307
+ho_22_anni_20261114_235558,8,ho 22 anni,140,4633,30.22,2026-11-15T04:11:20,ho_22_anni_20261114_235558
+ho_22_anni_20261115_002436,8,ho 22 anni,125,4133,30.24,2026-11-15T04:11:21,ho_22_anni_20261115_002436
+il_treno_e_alle_19_20261115_000459,12,il treno è alle 19,216,7167,30.14,2026-11-15T04:11:21,il_treno_e_alle_19_20261115_000459
+il_treno_e_alle_19_20261115_002848,12,il treno è alle 19,197,6533,30.15,2026-11-15T04:11:22,il_treno_e_alle_19_20261115_002848
+io_abito_a_verona_20261114_235402,6,io abito a Verona,132,4367,30.23,2026-11-15T04:11:22,io_abito_a_verona_20261114_235402
+io_abito_a_verona_20261115_002333,6,io abito a Verona,152,5033,30.2,2026-11-15T04:11:23,io_abito_a_verona_20261115_002333
+io_torno_a_casa_in_treno_20261115_000216,10,io torno a casa in treno,224,7433,30.14,2026-11-15T04:11:24,io_torno_a_casa_in_treno_20261115_000216
+io_torno_a_casa_in_treno_20261115_002659,10,io torno a casa in treno,210,6967,30.14,2026-11-15T04:11:24,io_torno_a_casa_in_treno_20261115_002659
+piacere_di_conoscerti_20261114_192606,1,piacere di conoscerti,114,3767,30.26,2026-11-15T04:11:25,piacere_di_conoscerti_20261114_192606
+piacere_di_conoscerti_20261114_234058,1,piacere di conoscerti,121,4000,30.25,2026-11-15T04:11:25,piacere_di_conoscerti_20261114_234058
+piacere_di_conoscerti_20261115_001920,1,piacere di conoscerti,119,3933,30.26,2026-11-15T04:11:25,piacere_di_conoscerti_20261115_001920
+quanti_anni_hai_20261114_235514,7,quanti anni hai?,88,2900,30.34,2026-11-15T04:11:26,quanti_anni_hai_20261114_235514
+quanti_anni_hai_20261115_002408,7,quanti anni hai?,87,2867,30.35,2026-11-15T04:11:26,quanti_anni_hai_20261115_002408
+tu_come_torni_a_casa_20261114_235816,9,tu come torni a casa?,186,6167,30.16,2026-11-15T04:11:27,tu_come_torni_a_casa_20261114_235816
+tu_come_torni_a_casa_20261115_002550,9,tu come torni a casa?,174,5767,30.17,2026-11-15T04:11:27,tu_come_torni_a_casa_20261115_002550
+venerdi_alle_19_facciamo_aperiti_20261114_192837,2,venerdì alle 19 facciamo aperitivo,269,8933,30.11,2026-11-15T04:11:28,venerdi_alle_19_facciamo_aperiti_20261114_192837
+venerdi_alle_19_facciamo_aperiti_20261114_234452,2,venerdì alle 19 facciamo aperitivo,268,8900,30.11,2026-11-15T04:11:29,venerdi_alle_19_facciamo_aperiti_20261114_234452
+venerdi_alle_19_facciamo_aperiti_20261115_001946,2,venerdì alle 19 facciamo aperitivo,271,9000,30.11,2026-11-15T04:11:29,venerdi_alle_19_facciamo_aperiti_20261115_001946

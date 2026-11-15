@@ -1,4 +1,4 @@
-# Sign Language Dataset Acquisition (`dataset.py`), Post-Processor (`postprocess.py`) & 3D Player (`preview.py`)
+# Sign Language Dataset Acquisition (`generate.py`), Post-Processor (`postprocess.py`) & 3D Player (`preview.py`)
 
 Complete, high-framerate dataset acquisition, post-processing, and 3D playback pipeline for **Italian Sign Language (LIS)** designed for training sequence-to-sequence neural networks (**Italian Sentence $\rightarrow$ 4 Synchronized 3D CSVs**).
 
@@ -62,9 +62,9 @@ To record dozens of Italian sentences without restarting the program:
 1. **Prepare [`config/prompts.txt`](./config/prompts.txt)**:
    - Write one Italian sentence per line (lines starting with `#` are ignored).
 2. **Auto-Resume & Manifest Self-Cleaning**:
-   - On startup, [`dataset.py`](./dataset.py) reads `output/manifest.csv`, automatically prunes any entries whose session folder was manually deleted from disk, and positions the **Teleprompter** on the first sentence with `0` recorded takes.
+   - On startup, [`generate.py`](./generate.py) reads `manifest.csv` inside the target output folder, automatically prunes any entries whose session folder was manually deleted from disk, and positions the **Teleprompter** on the first sentence with `0` recorded takes.
 3. **RAM-Buffered Recording & Auto-Advance (`SPACE`)**:
-   - During recording, frames are buffered in RAM (with `frame_seq` deduplication so duplicate camera frames are never written) and flushed to disk in a single burst when you press **`SPACE`** to stop, automatically advancing to the next sentence.
+   - During recording, frames are buffered in RAM (with `frame_seq` deduplication so duplicate camera frames are never written) and flushed to disk in a single burst into `<slug>_<YYYYMMDD_HHMMSS>` when you press **`SPACE`** to stop, automatically advancing to the next sentence.
 4. **Instant Discard & Redo (`x` / `Backspace`)**:
    - Pressing **`x`** (or **`Backspace`**) during or right after a take deletes that take folder, removes its entry from `manifest.csv`, and keeps the Teleprompter on that sentence to redo it immediately.
 
@@ -93,30 +93,39 @@ To record dozens of Italian sentences without restarting the program:
 ## 6. Dataset & CSV Structure
 
 ```text
-output/ (or output_processed/)
-├── manifest.csv                                     # Global index for PyTorch/TensorFlow Dataset
-├── 0001_ciao_mi_chiamo_chiara_20261114_185050/
-│   ├── metadata.json                                # Sentence, frame count, duration, FPS, mannequin config, postprocess stats
-│   ├── left_hand.csv                                # 26 left-hand 3D joints (pos + quat, 186 cols)
-│   ├── right_hand.csv                               # 26 right-hand 3D joints (pos + quat, 186 cols)
-│   ├── face.csv                                     # 478 3D face landmarks + 52 blendshapes (1489 cols)
-│   └── body.csv                                     # 5 upper-body 3D joints: neck, shoulders, elbows (23 cols)
-└── ...
+dataset/
+├── row/                                             # Raw recorded sessions grouped by speaker
+│   ├── output-chiara/
+│   │   ├── manifest.csv                             # Global index for PyTorch/TensorFlow Dataset
+│   │   ├── ciao_mi_chiamo_chiara_20261114_185050/
+│   │   │   ├── metadata.json                        # Sentence, frame count, duration, FPS, mannequin config
+│   │   │   ├── left_hand.csv                        # 26 left-hand 3D joints (pos + quat, 186 cols)
+│   │   │   ├── right_hand.csv                       # 26 right-hand 3D joints (pos + quat, 186 cols)
+│   │   │   ├── face.csv                             # 478 3D face landmarks + 52 blendshapes (1489 cols)
+│   │   │   └── body.csv                             # 5 upper-body 3D joints: neck, shoulders, elbows (23 cols)
+│   │   └── ...
+│   ├── output-davide/
+│   ├── output-gabriele/
+│   └── output-matteo/
+└── processed/                                       # Post-processed sessions (mirrored folder structure, 30 FPS)
+    ├── output-chiara/
+    ├── output-davide/
+    ├── output-gabriele/
+    └── output-matteo/
 ```
 
 ---
 
 ## 7. Codebase Structure
 
-Only the **3 executable scripts (`dataset.py`, `postprocess.py`, and `preview.py`)** and [`requirements.txt`](./requirements.txt) sit at the root; configuration files live in [`config/`](./config) and library modules live in [`core/`](./core):
+Only the **3 executable scripts (`generate.py`, `postprocess.py`, and `preview.py`)** and [`requirements.txt`](./requirements.txt) sit at the root; configuration files live in [`config/`](./config), library modules live in [`core/`](./core), and recorded datasets live in `dataset/` (or `output/` for new raw captures):
 
-| File | Responsibility |
+| File / Folder | Responsibility |
 | :--- | :--- |
-| [`dataset.py`](./dataset.py) | **Executable — Dataset Recorder**: launches parallel `FaceTrackerWorker` and `BodyTrackerWorker` threads, Rokoko Smartgloves worker, live 3D Studio Teleprompter viewport, and RAM-buffered CSV export. |
-| [`postprocess.py`](./postprocess.py) | **Executable — Neural-Network Post-Processor**: batch-cleans recorded sessions from `./output` (including nested speaker subfolders) into `./output_processed`. |
+| [`generate.py`](./generate.py) | **Executable — Dataset Recorder**: launches parallel `FaceTrackerWorker` and `BodyTrackerWorker` threads, Rokoko Smartgloves worker, live 3D Studio Teleprompter viewport, and RAM-buffered CSV export. |
+| [`postprocess.py`](./postprocess.py) | **Executable — Neural-Network Post-Processor**: batch-cleans recorded sessions preserving speaker subfolder hierarchy (`--input-dir` $\rightarrow$ `--output-dir`). |
 | [`preview.py`](./preview.py) | **Executable — 3D Playback Viewer**: replays any raw or post-processed session folder with a live **`[t]`** toggle to switch between **RAW** and **POST-PROCESSED** frames in real time. |
-| [`config/config.json`](./config/config.json) | Default anatomical dimensions and scale factors for the 3D mannequin. |
-| [`config/prompts.txt`](./config/prompts.txt) | Default list of Italian sentences loaded by the Teleprompter. |
+| [`config/`](./config) | Configuration & prompt lists (`config.json`, `prompts.txt`, `frasi.txt`, `frasi2.txt`, `frasi3.txt`, `frasi4.txt`). |
 | [`core/config.py`](./core/config.py) | Hardware constants + [`MannequinConfig`](./core/config.py) loader supporting JSON files (`--config`) and anthropometric height scaling (`--height`). |
 | [`core/state.py`](./core/state.py) | Thread-safe [`SharedState`](./core/state.py) with unified `handle_key()` dispatcher, mandatory 3s calibration countdown timer, and Teleprompter queue state. |
 | [`core/camera_tracker.py`](./core/camera_tracker.py) | Parallel [`FaceTrackerWorker`](./core/camera_tracker.py) and [`BodyTrackerWorker`](./core/camera_tracker.py) threads (`640x480 @ 60 FPS`) with pre-rendered PiP thumbnails and `frame_seq` tracking. |
@@ -124,24 +133,26 @@ Only the **3 executable scripts (`dataset.py`, `postprocess.py`, and `preview.py
 | [`core/renderer_3d.py`](./core/renderer_3d.py) | Shared 3D perspective renderer (`Camera3D`, vectorized NumPy face projection, [`render_live_studio_frame`](./core/renderer_3d.py), and [`render_playback_studio_frame`](./core/renderer_3d.py)). |
 | [`core/csv_exporter.py`](./core/csv_exporter.py) | [`SessionCsvExporter`](./core/csv_exporter.py) (RAM buffering, 4 CSVs + `metadata.json` + self-cleaning `manifest.csv`, take rollback) and [`load_session`](./core/csv_exporter.py). |
 | [`core/postprocessor.py`](./core/postprocessor.py) | [`postprocess_frames`](./core/postprocessor.py) and [`postprocess_session_dir`](./core/postprocessor.py) implementing the 5-stage neural-network post-processing pipeline. |
+| `dataset/` | Collected dataset split into `dataset/row/` (raw captures) and `dataset/processed/` (cleaned 30 FPS sequences). |
+| `models/` | Local MediaPipe task models (`face_landmarker.task`, `pose_landmarker_lite.task`). |
 
 ---
 
 ## 8. Usage & Controls
 
-### A. Record Dataset (`dataset.py`)
+### A. Record Dataset (`generate.py`)
 ```bash
 # Start with default ./config/config.json and ./config/prompts.txt
-python dataset.py
+python generate.py
 
 # Deduce all mannequin proportions automatically from actor height (like Rokoko Studio)
-python dataset.py --height 1.65 --prompts config/frasi.txt --output-dir output/output-chiara
+python generate.py --height 1.65 --prompts config/frasi.txt --output-dir output/output-chiara
 
 # Load a custom mannequin configuration JSON file
-python dataset.py --config config/config.json
+python generate.py --config config/config.json
 ```
 
-| Key (`dataset.py`) | Action |
+| Key (`generate.py`) | Action |
 | :--- | :--- |
 | **`SPACE`** | **Start** (3s straight-pose calibration countdown) / **Stop** recording & auto-advance to next sentence |
 | **`x`** / **`Backspace`** | **Discard & Redo**: delete the active or just-recorded take and stay on that sentence |
@@ -154,30 +165,30 @@ python dataset.py --config config/config.json
 
 ### B. Post-Process Dataset for Neural Networks (`postprocess.py`)
 ```bash
-# Process all sessions in ./output (including subfolders) -> ./output_processed at 30 FPS
-python postprocess.py
+# Process all sessions from dataset/row -> dataset/processed at 30 FPS
+python postprocess.py --input-dir dataset/row --output-dir dataset/processed
 
 # Process at 60 FPS
-python postprocess.py --fps 60
+python postprocess.py --input-dir dataset/row --output-dir dataset/processed --fps 60
 
 # Process a single speaker folder or a single session folder
-python postprocess.py output/output-chiara
-python postprocess.py output/output-chiara/0001_ciao_mi_chiamo_chiara_20261114_185050
+python postprocess.py dataset/row/output-chiara --output-dir dataset/processed/output-chiara
+python postprocess.py dataset/row/output-chiara/ciao_mi_chiamo_chiara_20261114_185050
 ```
 
 ---
 
 ### C. Replay Recorded or Post-Processed 3D Animation (`preview.py`)
 ```bash
-# Replay the latest recorded session in ./output (press [t] at any time to toggle RAW vs POST-PROCESSED!)
-python preview.py
+# Replay a specific raw session (press [t] at any time to toggle RAW vs POST-PROCESSED!)
+python preview.py dataset/row/output-chiara/piacere_di_conoscerti_20261114_185239
 
-# Replay a specific session folder
-python preview.py output/output-chiara/0002_piacere_di_conoscerti_20261114_185239
+# Replay a specific post-processed session
+python preview.py dataset/processed/output-chiara/piacere_di_conoscerti_20261114_185239
 
-# Start directly in POST-PROCESSED mode (from ./output_processed or computed on the fly)
-python preview.py --processed
-python preview.py output/output-chiara/0002_piacere_di_conoscerti_20261114_185239 --processed
+# Replay the latest recorded session in a folder
+python preview.py --output-dir dataset/row/output-chiara
+python preview.py --output-dir dataset/processed/output-chiara --processed
 ```
 
 | Key (`preview.py`) | Action |

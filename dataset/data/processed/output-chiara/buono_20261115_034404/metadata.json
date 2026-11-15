@@ -1,0 +1,43 @@
+{
+  "sample_id": "buono_20261115_034404",
+  "prompt_index": 4,
+  "sentence": "buono",
+  "num_frames": 100,
+  "duration_ms": 3300,
+  "avg_fps": 30.3,
+  "created_at": "2026-11-15T04:10:42",
+  "postprocessed": true,
+  "postprocess_stats": {
+    "raw_frames": 225,
+    "raw_duration_ms": 4683,
+    "raw_fps": 48.05,
+    "trimmed_start_frames": 34,
+    "trimmed_end_frames": 33,
+    "interpolated_face_frames": 0,
+    "interpolated_body_frames": 0,
+    "interpolated_left_frames": 0,
+    "interpolated_right_frames": 0,
+    "target_fps": 30.0
+  },
+  "mannequin": {
+    "actor_height_m": 1.75,
+    "shoulder_height_m": 1.35,
+    "pelvis_height_m": 0.88,
+    "shoulder_half_width_m": 0.19,
+    "hip_half_width_m": 0.11,
+    "elbow_x_m": 0.24,
+    "elbow_y_m": 1.09,
+    "neck_to_chin_y_m": 0.115,
+    "neck_to_chin_z_m": 0.04,
+    "face_height_m": 0.25,
+    "face_width_m": 0.195,
+    "face_depth_m": 0.16,
+    "hand_rig_scale": 0.82
+  },
+  "files": {
+    "left_hand": "left_hand.csv",
+    "right_hand": "right_hand.csv",
+    "face": "face.csv",
+    "body": "body.csv"
+  }
+}

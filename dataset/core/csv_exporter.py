@@ -165,7 +165,7 @@ class SessionCsvExporter:
         self.close()
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         slug = _slugify(sentence)
-        sample_id = f"{prompt_idx + 1:04d}_{slug}_{stamp}"
+        sample_id = f"{slug}_{stamp}"
         self.session_dir = self.output_root / sample_id
 
         self.current_prompt_idx = prompt_idx
@@ -612,15 +612,16 @@ def find_latest_session(output_root: Path) -> Path | None:
     if output_root.is_dir() and (output_root / "face.csv").exists():
         return output_root
     candidates: list[Path] = []
-    for d in output_root.iterdir():
-        if not d.is_dir():
-            continue
-        if (d / "face.csv").exists():
-            candidates.append(d)
-        else:
-            for sub in d.iterdir():
-                if sub.is_dir() and (sub / "face.csv").exists():
-                    candidates.append(sub)
+
+    def _walk(curr: Path) -> None:
+        if (curr / "face.csv").exists():
+            candidates.append(curr)
+            return
+        for child in curr.iterdir():
+            if child.is_dir():
+                _walk(child)
+
+    _walk(output_root)
     if not candidates:
         return None
     return max(candidates, key=lambda d: d.stat().st_mtime)
