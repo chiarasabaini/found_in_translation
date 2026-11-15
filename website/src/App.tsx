@@ -13,10 +13,11 @@ import { AvatarViewport } from './components/AvatarViewport';
 import { deleteRecordedClip, downloadText, loadRecordedClips, saveRecordedClip } from './recording/clipStore';
 import { getSignLanguage, localizeClass, useLanguageSettings } from './i18n/languages';
 import { useAvatarChoice } from './avatars/avatarCatalog';
-import type { GenerationResult, InterpreterMode } from './components/PhraseInputPanel';
+import type { DictionarySequence, GenerationResult, InterpreterMode } from './components/PhraseInputPanel';
 import { configuredModelUrl, HttpMotionModel, type GeneratedMotion, type MotionGenerator } from './generation/motionModel';
 import { motionToAnimation } from './generation/motionToAnimation';
-import type { TransitionCurve } from './generation/stitchClips';
+import { stitchClips, type TransitionCurve } from './generation/stitchClips';
+import { glossOf, planSigns, type PlannedSign } from './generation/signPlanner';
 import { MockMotionModel } from './generation/mockMotionModel';
 
 // Secondary views load on first use, so the interpreter starts faster.
@@ -57,6 +58,9 @@ export default function App() {
   const transitionCurveRef = useRef(transitionCurve);
   transitionCurveRef.current = transitionCurve;
   const lastMotionRef = useRef<{ text: string; motion: GeneratedMotion } | null>(null);
+  // Dictionary mode: a phrase with several dictionary signs plays their clips joined.
+  const [dictSequence, setDictSequence] = useState<DictionarySequence | null>(null);
+  const lastSequenceRef = useRef<{ text: string; payloads: SignAnimationPayload[]; signs: DictionarySequence['signs']; unmatched: string[] } | null>(null);
   const generationAbortRef = useRef<AbortController | null>(null);
 
   const [avatar, setAvatar] = useAvatarChoice();
@@ -80,27 +84,36 @@ export default function App() {
     return out;
   }, [allRecordedClips, signLanguage.code]);
 
+  /** Stored clip of a class: the assigned glove recording if any, otherwise the cached pipeline clip. */
+  const cachedClassPayload = useCallback((cls: DictionaryClass): SignAnimationPayload | null => {
+    const key = clipKey(signCodeRef.current, cls.id);
+    return allRecordedClipsRef.current[key] ?? animCacheRef.current.get(key) ?? null;
+  }, []);
+
+  const getClassPayload = useCallback(async (cls: DictionaryClass): Promise<SignAnimationPayload> => {
+    const cached = cachedClassPayload(cls);
+    if (cached) return cached;
+    const res = await fetch(cls.animationUrl);
+    if (!res.ok) throw new Error(`Cannot load ${cls.animationUrl}`);
+    const payload = (await res.json()) as SignAnimationPayload;
+    animCacheRef.current.set(clipKey(signCodeRef.current, cls.id), payload);
+    return payload;
+  }, [cachedClassPayload]);
+
   const loadClassAnimation = useCallback(async (cls: DictionaryClass, autoPlay: boolean) => {
     setActiveClassId(cls.id);
-    const recorded = allRecordedClipsRef.current[clipKey(signCodeRef.current, cls.id)];
-    if (recorded) {
-      setActiveAnimation(recorded);
-      if (autoPlay) setPlayTrigger((n) => n + 1);
-      return;
-    }
-    const cacheKey = clipKey(signCodeRef.current, cls.id);
-    const cached = animCacheRef.current.get(cacheKey);
-    if (cached) {
-      setActiveAnimation(cached);
+    setDictSequence(null);
+    lastSequenceRef.current = null;
+    lastMotionRef.current = null;
+    const fromCache = cachedClassPayload(cls);
+    if (fromCache) {
+      setActiveAnimation(fromCache);
       if (autoPlay) setPlayTrigger((n) => n + 1);
       return;
     }
     setLoadingAnim(true);
     try {
-      const res = await fetch(cls.animationUrl);
-      if (!res.ok) throw new Error(`Cannot load ${cls.animationUrl}`);
-      const payload = (await res.json()) as SignAnimationPayload;
-      animCacheRef.current.set(cacheKey, payload);
+      const payload = await getClassPayload(cls);
       setActiveAnimation(payload);
       if (autoPlay) setPlayTrigger((n) => n + 1);
     } catch (err) {
@@ -108,7 +121,7 @@ export default function App() {
     } finally {
       setLoadingAnim(false);
     }
-  }, []);
+  }, [cachedClassPayload, getClassPayload]);
 
   // Load the dictionary of the selected sign language (and the stored recordings once).
   useEffect(() => {
@@ -155,6 +168,8 @@ export default function App() {
     setMatchResult(null);
     setGeneration(null);
     lastMotionRef.current = null;
+    setDictSequence(null);
+    lastSequenceRef.current = null;
   }, [languages.sourceLanguage, languages.signLanguage]);
 
   // Dictionary text in the source language; durations of recorded clips where present.
@@ -215,12 +230,57 @@ export default function App() {
       );
       if (ctrl.signal.aborted) return;
       lastMotionRef.current = { text, motion };
+      lastSequenceRef.current = null;
+      setDictSequence(null);
       showMotion(text, motion, transitionCurveRef.current, true);
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') return;
       setLoadError(err instanceof Error ? err.message : 'Motion generation failed');
     } finally {
       if (generationAbortRef.current === ctrl) setGenerating(false);
+    }
+  };
+
+  /** Joins the stored clips of several dictionary signs. */
+  const showSequence = useCallback(
+    (seq: NonNullable<typeof lastSequenceRef.current>, curve: TransitionCurve, autoPlay: boolean) => {
+      const r = stitchClips(seq.payloads.map((payload) => ({ payload })), { curve });
+      r.payload.classId = 'sequence';
+      r.payload.phrase = seq.text;
+      r.payload.category = 'Dictionary sequence';
+      r.payload.description = seq.signs.map((x) => x.gloss).join(' · ');
+      setDictSequence({
+        signs: seq.signs.map((x, i) => ({
+          ...x,
+          startSec: Math.round(r.segments[i].startSec * 100) / 100,
+          endSec: Math.round(r.segments[i].endSec * 100) / 100,
+        })),
+        unmatched: seq.unmatched,
+      });
+      setActiveClassId(null);
+      setActiveAnimation(r.payload);
+      if (autoPlay) setPlayTrigger((n) => n + 1);
+    },
+    [],
+  );
+
+  const playDictionarySequence = async (text: string, signs: PlannedSign[], unmatched: string[]) => {
+    setLoadingAnim(true);
+    try {
+      const payloads = await Promise.all(signs.map((x) => getClassPayload(x.cls)));
+      const seq = {
+        text,
+        payloads,
+        signs: signs.map((x) => ({ text: x.text, phrase: x.cls.phrase, gloss: glossOf(x.cls), classId: x.cls.id, startSec: 0, endSec: 0 })),
+        unmatched,
+      };
+      lastSequenceRef.current = seq;
+      lastMotionRef.current = null;
+      showSequence(seq, transitionCurveRef.current, true);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Cannot load the sign clips');
+    } finally {
+      setLoadingAnim(false);
     }
   };
 
@@ -235,6 +295,12 @@ export default function App() {
     }
   }, [transitionCurve, showMotion]);
 
+  // ...and the last dictionary sequence.
+  useEffect(() => {
+    const last = lastSequenceRef.current;
+    if (last) showSequence(last, transitionCurve, true);
+  }, [transitionCurve, showSequence]);
+
   const handleSubmitQuery = (textOverride?: string) => {
     if (!dictionary) return;
     const text = textOverride !== undefined ? textOverride : query;
@@ -243,8 +309,17 @@ export default function App() {
       void handleGenerate(text);
       return;
     }
+    // Several dictionary phrases in the text: join their clips.
+    const plan = planSigns(text, classes);
+    if (plan.signs.length >= 2) {
+      setMatchResult(null);
+      void playDictionarySequence(text, plan.signs, plan.unmatched);
+      return;
+    }
     const res = runMatch(text);
     setMatchResult(res);
+    setDictSequence(null);
+    lastSequenceRef.current = null;
     if (res.matched && res.best) {
       const targetCls = classes.find((c) => c.id === res.best?.classId);
       if (targetCls) void loadClassAnimation(targetCls, true);
@@ -319,6 +394,7 @@ export default function App() {
             onChangeQuery={setQuery}
             onSubmitQuery={handleSubmitQuery}
             matchResult={matchResult}
+            dictSequence={dictSequence}
             classes={classes}
             activeClassId={activeClassId}
             activeAnimation={displayedAnimation}

@@ -236,16 +236,29 @@ function sideActivity(s: ClipSampler, side: 'right' | 'left', t: number): number
   return sum;
 }
 
-/** Stroke of a rest-to-rest clip: where the arms are clearly away from the first frame. */
+/**
+ * Stroke of a rest-to-rest clip: where the arms hold the sign, away from the first frame (rest).
+ * The sign level is the median arm rotation over the frames clearly away from rest; the stroke
+ * is where the rotation stays above 75% of that level, so the raise from rest and the drop
+ * back to rest are left out.
+ */
 export function detectStroke(payload: SignAnimationPayload): { startSec: number; endSec: number } {
   const s = new ClipSampler(payload);
   const act = payload.times.map((t) => Math.max(sideActivity(s, 'right', t), sideActivity(s, 'left', t)));
   const peak = Math.max(0, ...act);
   if (peak < 0.1) return { startSec: 0, endSec: s.duration };
-  const thr = Math.max(0.1, 0.45 * peak);
+  const core = act.filter((a) => a >= 0.45 * peak).sort((a, b) => a - b);
+  const level = core[Math.floor(core.length / 2)] ?? peak;
+  const thr = Math.max(0.1, 0.75 * level);
   let i0 = act.findIndex((a) => a >= thr);
   let i1 = act.length - 1 - [...act].reverse().findIndex((a) => a >= thr);
   if (i0 < 0) [i0, i1] = [0, act.length - 1];
+  // Move the cuts inward while the arms are still rising from rest or already dropping back:
+  // the velocity at the cut feeds the transition, and the motion to or from rest must not.
+  const fast = 1.2 / s.fps; // rad per frame (1.2 rad/s)
+  const maxMove = Math.round(0.25 * s.fps);
+  for (let n = 0; n < maxMove && i0 + 1 < i1 && act[i0 + 1] - act[i0] > fast; n++) i0++;
+  for (let n = 0; n < maxMove && i1 - 1 > i0 && act[i1 - 1] - act[i1] > fast; n++) i1--;
   return { startSec: payload.times[i0], endSec: payload.times[i1] };
 }
 

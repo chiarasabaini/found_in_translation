@@ -8,6 +8,13 @@ import type { TransitionCurve } from '../generation/stitchClips';
 
 export type InterpreterMode = 'model' | 'dictionary';
 
+/** Dictionary mode: several dictionary signs found in the phrase, played joined. */
+export interface DictionarySequence {
+  signs: Array<{ text: string; phrase: string; gloss: string; classId: string; startSec: number; endSec: number }>;
+  /** Words that match no dictionary sign. */
+  unmatched: string[];
+}
+
 export interface GenerationResult {
   text: string;
   motion: GeneratedMotion;
@@ -18,6 +25,7 @@ interface PhraseInputPanelProps {
   onChangeQuery: (value: string) => void;
   onSubmitQuery: (textOverride?: string) => void;
   matchResult: MatchResult | null;
+  dictSequence: DictionarySequence | null;
   classes: DictionaryClass[];
   activeClassId: string | null;
   activeAnimation: SignAnimationPayload | null;
@@ -46,11 +54,31 @@ const MODES: ReadonlyArray<readonly [InterpreterMode, string]> = [
   ['dictionary', 'Dictionary'],
 ];
 
+const TransitionCurveSelect: React.FC<{
+  id: string;
+  value: TransitionCurve;
+  onChange: (curve: TransitionCurve) => void;
+}> = ({ id, value, onChange }) => (
+  <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+    <label htmlFor={id}>Transitions between signs</label>
+    <select
+      id={id}
+      value={value}
+      onChange={(e) => onChange(e.target.value as TransitionCurve)}
+      className="rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-xs text-slate-900 cursor-pointer"
+    >
+      <option value="quintic">Quintic (minimum jerk)</option>
+      <option value="cubic">Cubic Hermite</option>
+    </select>
+  </div>
+);
+
 export const PhraseInputPanel: React.FC<PhraseInputPanelProps> = ({
   query,
   onChangeQuery,
   onSubmitQuery,
   matchResult,
+  dictSequence,
   classes,
   activeClassId,
   activeAnimation,
@@ -178,18 +206,7 @@ export const PhraseInputPanel: React.FC<PhraseInputPanelProps> = ({
                   )}
                 </summary>
                 {hasClips && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <label htmlFor="transition-curve">Transitions between signs</label>
-                    <select
-                      id="transition-curve"
-                      value={transitionCurve}
-                      onChange={(e) => onChangeTransitionCurve(e.target.value as TransitionCurve)}
-                      className="rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-xs text-slate-900 cursor-pointer"
-                    >
-                      <option value="quintic">Quintic (minimum jerk)</option>
-                      <option value="cubic">Cubic Hermite</option>
-                    </select>
-                  </div>
+                  <TransitionCurveSelect id="transition-curve" value={transitionCurve} onChange={onChangeTransitionCurve} />
                 )}
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {outputFiles.map((f) => (
@@ -209,8 +226,33 @@ export const PhraseInputPanel: React.FC<PhraseInputPanelProps> = ({
           </div>
         )}
 
+        {/* Dictionary sequence: several signs joined */}
+        {mode === 'dictionary' && dictSequence && (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3.5 space-y-2" aria-live="polite">
+            <div className="flex items-center gap-2 text-slate-900 font-medium text-sm">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" aria-hidden="true" />
+              <span>{dictSequence.signs.length} signs joined</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {dictSequence.signs.map((x, i) => (
+                <span
+                  key={i}
+                  title={`"${x.text}" · ${x.startSec.toFixed(2)}–${x.endSec.toFixed(2)} s`}
+                  className="px-2 py-0.5 rounded-md text-xs font-medium bg-white border border-slate-200 text-slate-800"
+                >
+                  {x.phrase}
+                </span>
+              ))}
+            </div>
+            {dictSequence.unmatched.length > 0 && (
+              <p className="text-xs text-amber-800">Not in the dictionary: {dictSequence.unmatched.join(', ')}</p>
+            )}
+            <TransitionCurveSelect id="dict-transition-curve" value={transitionCurve} onChange={onChangeTransitionCurve} />
+          </div>
+        )}
+
         {/* Dictionary match feedback */}
-        {mode === 'dictionary' && matchResult && matchResult.normalizedQuery && (
+        {mode === 'dictionary' && !dictSequence && matchResult && matchResult.normalizedQuery && (
           <div className="mt-4" aria-live="polite">
             {matchResult.matched && matchResult.best ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3.5">

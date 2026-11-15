@@ -50,7 +50,7 @@ Retargeting method (`src/recording/recordingRetarget.ts`): bone directions from 
 
 ## Motion model (text → motion)
 
-In the **Interpreter**, the default mode is **Motion model**: the typed phrase goes to a text-to-motion model, the model returns recording-format files, and the site animates the avatar with the same import and retargeting used for real recordings. **Dictionary** mode keeps the old behavior (closed dictionary → stored animation) and lists the dictionary phrases. In model mode the panel shows only the prompt and, after signing, the gloss sequence, the words not signed and the model output files.
+In the **Interpreter**, the default mode is **Motion model**: the typed phrase goes to a text-to-motion model, the model returns recording-format files, and the site animates the avatar with the same import and retargeting used for real recordings. **Dictionary** mode plays the stored animations of the closed dictionary and lists the dictionary phrases. A phrase with several dictionary phrases ("Hello, how are you? Thank you") is split into signs (`src/generation/signPlanner.ts`, the same splitter the mock model uses), and their stored clips (or the glove recordings assigned to them) are joined with the same transitions as the model clips. In model mode the panel shows only the prompt and, after signing, the gloss sequence, the words not signed and the model output files.
 
 The real model does not exist yet. Until then, `src/generation/mockMotionModel.ts` plays its role in the browser: it splits the phrase into dictionary signs and synthesizes one rest-to-rest clip per sign (CSV files at 30 Hz) from placeholder handshapes, the dictionary anchors and motion arcs, and arm IK, as the real model will. **The mock handshapes are not validated LIS signs.** The interpreter shows the gloss sequence, the words it could not sign, and buttons to download the generated CSV files.
 
@@ -90,7 +90,7 @@ Instead of `files` (one continuous recording of the phrase), the model can retur
 }
 ```
 
-`strokeStartSec` / `strokeEndSec` mark the sign inside the clip (after leaving rest, before returning). They are optional: when missing, the site detects them from the arm motion.
+`strokeStartSec` / `strokeEndSec` mark the sign inside the clip (after leaving rest, before returning). They are optional: when missing, the site detects them from the arm motion (`detectStroke`: the part where the arms hold the sign level, without the raise from rest and the drop back to rest).
 
 File contract (same as the "Real recordings" table above):
 
@@ -103,7 +103,7 @@ File contract (same as the "Real recordings" table above):
 
 `src/generation/stitchClips.ts` turns the per-sign clips into one animation:
 
-1. Each clip is retargeted on its own (one glove yaw for all clips).
+1. Each clip is retargeted on its own (one glove yaw for all clips). Dictionary clips are already retargeted.
 2. The stroke of every sign is kept unchanged, plus the lead-in of the first sign and the lead-out of the last one. The rest pose between signs is removed.
 3. Each gap gets a transition from the end pose of sign A to the start pose of sign B. It matches pose and velocity (and acceleration, with the quintic curve) at both ends:
    - bone rotations: Hermite curve on the rotation vector, `q(t) = q0 · exp(h(t))`; the end velocity goes through the inverse right Jacobian of SO(3), so the angular velocity matches at both joins;

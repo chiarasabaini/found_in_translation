@@ -7,6 +7,7 @@ import { IDENTITY, qConj, qFromAxisAngle, qMul, qNormalize, type Quat, type Vec3
 import { detectStroke, qExp, qLog, stitchClips, type TransitionCurve } from './stitchClips';
 import { MockMotionModel } from './mockMotionModel';
 import { motionToAnimation, motionOutputFiles } from './motionToAnimation';
+import { planSigns } from './signPlanner';
 
 const FPS = 30;
 const H = 1 / FPS;
@@ -216,5 +217,35 @@ test('mock per-sign clips are joined into one smooth animation', async () => {
   for (const tr of anim.transitions) {
     const k = Math.round(((tr.startSec + tr.endSec) / 2) * 30);
     assert.ok(angle(quat(p.boneTracks.rightUpperArm, k), rest) > 0.3, 'right arm drops to rest in a transition');
+  }
+});
+
+test('stored dictionary clips of a multi-sign phrase are joined (stroke detected automatically)', () => {
+  const dict = JSON.parse(readFileSync('public/data/dictionary.json', 'utf8')) as DictionaryPayload;
+  const en = dict.classes.map((c) => localizeClass(c, 'en', 'it'));
+  const plan = planSigns('Hello, how are you? Thank you', en);
+  assert.deepEqual(plan.signs.map((s) => s.cls.id), ['ciao', 'come_stai', 'grazie']);
+  const payloads = plan.signs.map((s) => JSON.parse(readFileSync(`public/data/animations/${s.cls.id}.json`, 'utf8')) as SignAnimationPayload);
+  const r = stitchClips(payloads.map((payload) => ({ payload })));
+  const p = r.payload;
+  assert.equal(r.transitions.length, 2);
+  // These clips have only ~0.13 s of rest at each edge, so the joined phrase is about as long
+  // as the clips one after the other; what changes is that the arms no longer drop between signs.
+  assert.ok(p.duration < payloads.reduce((t, x) => t + x.duration, 0) + 0.5, `stitched ${p.duration}`);
+  const rest = quat(p.boneTracks.rightUpperArm, 0);
+  for (const tr of r.transitions) {
+    const mid = Math.round(((tr.startSec + tr.endSec) / 2) * FPS);
+    assert.ok(angle(quat(p.boneTracks.rightUpperArm, mid), rest) > 0.5, 'right arm drops to rest between signs');
+    for (const f of Object.values(p.boneTracks)) {
+      for (let k = Math.round(tr.startSec * FPS) - 1; k <= Math.round(tr.endSec * FPS) + 1; k++) {
+        assert.ok(angle(quat(f, k - 1), quat(f, k)) < 0.3, `jump at frame ${k}`);
+      }
+    }
+  }
+  // The detected strokes keep the core of each sign.
+  for (const [i, seg] of r.segments.entries()) {
+    const s = detectStroke(payloads[i]);
+    assert.ok(s.endSec - s.startSec > 0.5 * payloads[i].duration, `stroke of ${plan.signs[i].cls.id} too short`);
+    assert.ok(seg.endSec > seg.startSec);
   }
 });
