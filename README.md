@@ -39,7 +39,7 @@ The website works like a text translator: pick the languages, type a phrase, and
 ```
  Rokoko Smartgloves ─┐
  face camera ────────┼─► generate.py ─► postprocess.py ─► dataset/data/processed
- body camera ────────┘   (capture)      (clean, trim,       139 samples, 4 CSV each
+ body camera ────────┘   (capture)      (clean, trim,       161 samples, 4 CSV each
                                          resample 30 fps)          │
                                                                    ▼ export at build time
  "Where do you live?" ─► English → Italian ─► LIS router ─► dataset clips ─► joined ─► 3D avatar
@@ -60,10 +60,10 @@ The website works like a text translator: pick the languages, type a phrase, and
 
 | | |
 |---|---|
-| Samples | 139 takes (`dataset/data/processed`), with the raw recordings in `dataset/data/row` |
-| Vocabulary | 89 distinct entries: 71 single words (including the numbers 1–30) and 18 phrases |
-| Signers | 4 (Chiara 103 takes, Gabriele 28, Matteo 5, Davide 3) |
-| Duration | ~9.7 minutes after trimming, 4.2 s per take on average, 30 fps |
+| Samples | 161 takes (`dataset/data/processed`), with the raw recordings in `dataset/data/row` |
+| Vocabulary | 111 distinct entries: 93 single words (including the numbers 1–30) and 18 phrases |
+| Signers | 4 (Chiara 103 takes, Gabriele 28, Davide 25, Matteo 5) |
+| Duration | ~10.3 minutes after trimming, 3.8 s per take on average, 30 fps |
 | Per take | `left_hand.csv`, `right_hand.csv`, `face.csv`, `body.csv`, `metadata.json` |
 
 Phrases include: *ciao mi chiamo Chiara*, *piacere di conoscerti*, *dove abiti?*, *io abito a Verona*, *quanti anni hai?*, *ho 22 anni*, *cosa fai domani?*, *a che ora è il treno?*, *il treno è alle 19*, *io torno a casa in treno*, *tu come torni a casa?*, *venerdì alle 19 facciamo aperitivo*, *con chi vieni all'aperitivo?*, *buona giornata*, *buon pomeriggio*, *per favore*.
