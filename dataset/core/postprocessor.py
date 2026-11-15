@@ -327,79 +327,59 @@ def _fill_missing_modalities(
     return out, interp_f, interp_b, interp_l, interp_r
 
 
-def _extract_pose_vector(f: RecordedFrame) -> list[float]:
-    """Extract 3D coordinates of wrists, middle fingertips, and elbows for staticity/pose comparison."""
-    pts: list[float] = []
-    for side, jn in (
-        ("left", "LeftHand"),
-        ("right", "RightHand"),
-        ("left", "LeftMiddleTip"),
-        ("right", "RightMiddleTip"),
-    ):
-        j = f.hands.get(side, {}).get("joints", {}).get(jn)
-        if j is not None:
-            pts.extend(j["position"])
-    for bname in ("left_elbow", "right_elbow"):
-        b = f.body_joints.get(bname)
-        if b is not None:
-            pts.extend((b[0] * 0.5, b[1] * 0.5, b[2] * 0.5))
-    return pts
+_TRIM_HAND_JOINTS = (
+    ("left", "LeftHand"),
+    ("right", "RightHand"),
+    ("left", "LeftMiddleTip"),
+    ("right", "RightMiddleTip"),
+)
 
 
-def _pose_rms_distance(v0: list[float], v1: list[float]) -> float:
-    """Compute RMS 3D distance in meters between two pose vectors."""
-    if not v0 or not v1 or len(v0) != len(v1):
-        return 0.0
-    num_joints = max(1, len(v0) // 3)
-    sq_sum = sum((a - b) * (a - b) for a, b in zip(v0, v1))
-    return math.sqrt(sq_sum / num_joints)
+def _max_hand_distance(f0: RecordedFrame, f1: RecordedFrame) -> float:
+    """Compute max 3D Euclidean distance in meters across wrists and middle fingertips."""
+    best = 0.0
+    for side, jn in _TRIM_HAND_JOINTS:
+        j0 = f0.hands.get(side, {}).get("joints", {}).get(jn)
+        j1 = f1.hands.get(side, {}).get("joints", {}).get(jn)
+        if j0 is None or j1 is None:
+            continue
+        p0, p1 = j0["position"], j1["position"]
+        dist = math.sqrt(
+            (p0[0] - p1[0]) ** 2 + (p0[1] - p1[1]) ** 2 + (p0[2] - p1[2]) ** 2
+        )
+        if dist > best:
+            best = dist
+    return best
 
 
 def _trim_head_and_tail(
     frames: list[RecordedFrame],
     trim_idle: bool = True,
 ) -> tuple[list[RecordedFrame], int, int]:
-    """Trim static initial and final calibration poses based on 3D pose distance and hand/arm velocity."""
+    """Trim initial and final calibration poses based on max single-hand 3D displacement."""
     n = len(frames)
     if not trim_idle or n <= 12:
         return frames, 0, 0
 
-    vecs = [_extract_pose_vector(f) for f in frames]
     dt0 = max(0.01, (frames[1].timestamp_ms - frames[0].timestamp_ms) / 1000.0)
-    if n >= 3 and (_pose_rms_distance(vecs[0], vecs[1]) / dt0) > 2.5:
+    if n >= 3 and (_max_hand_distance(frames[0], frames[1]) / dt0) > 2.5:
         frames[0].hands = dict(frames[1].hands)
-        vecs[0] = list(vecs[1])
 
-    ref_start = vecs[min(2, n - 1)]
-    ref_end = vecs[max(0, n - 3)]
-
-    d_start = [_pose_rms_distance(v, ref_start) for v in vecs]
-    d_end = [_pose_rms_distance(v, ref_end) for v in vecs]
-
-    raw_sp = [0.0]
-    for i in range(1, n):
-        dt_s = max(0.008, (frames[i].timestamp_ms - frames[i - 1].timestamp_ms) / 1000.0)
-        raw_sp.append(_pose_rms_distance(vecs[i], vecs[i - 1]) / dt_s)
-
-    sp_smooth = [
-        sum(raw_sp[max(0, i - 2) : min(n, i + 3)])
-        / len(raw_sp[max(0, i - 2) : min(n, i + 3)])
-        for i in range(n)
-    ]
+    ref_start = frames[min(2, n - 1)]
+    ref_end = frames[max(0, n - 3)]
 
     active_indices = [
         i
         for i in range(n)
-        if (sp_smooth[i] > 0.08 and d_start[i] > 0.025 and d_end[i] > 0.025)
-        or (d_start[i] > 0.08 and d_end[i] > 0.08)
+        if _max_hand_distance(frames[i], ref_start) > 0.06
+        and _max_hand_distance(frames[i], ref_end) > 0.06
     ]
 
     start_idx = 0
     end_idx = n - 1
     if active_indices:
-        pad = 4
-        new_start = max(0, active_indices[0] - pad)
-        new_end = min(n - 1, active_indices[-1] + pad)
+        new_start = active_indices[0]
+        new_end = active_indices[-1]
         if new_end - new_start + 1 >= 10:
             start_idx = new_start
             end_idx = new_end

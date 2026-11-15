@@ -1,6 +1,6 @@
 sample_id,prompt_index,sentence,num_frames,duration_ms,avg_fps,created_at,session_dir
-con_chi_vieni_all_aperitivo_20261115_012151,3,con chi vieni all'aperitivo?,269,8933,30.11,2026-11-15T04:11:30,con_chi_vieni_all_aperitivo_20261115_012151
-cosa_fai_domani_20261115_012313,4,cosa fai domani?,154,5100,30.2,2026-11-15T04:11:31,cosa_fai_domani_20261115_012313
-dove_abiti_20261115_012359,5,dove abiti?,147,4867,30.2,2026-11-15T04:11:31,dove_abiti_20261115_012359
-piacere_di_conoscerti_20261115_011826,1,piacere di conoscerti,122,4033,30.25,2026-11-15T04:11:32,piacere_di_conoscerti_20261115_011826
-venerdi_alle_19_facciamo_aperiti_20261115_012030,2,venerdì alle 19 facciamo aperitivo,333,11067,30.09,2026-11-15T04:11:33,venerdi_alle_19_facciamo_aperiti_20261115_012030
+con_chi_vieni_all_aperitivo_20261115_012151,3,con chi vieni all'aperitivo?,261,8667,30.11,2026-11-15T05:00:03,con_chi_vieni_all_aperitivo_20261115_012151
+cosa_fai_domani_20261115_012313,4,cosa fai domani?,144,4767,30.21,2026-11-15T05:00:03,cosa_fai_domani_20261115_012313
+dove_abiti_20261115_012359,5,dove abiti?,131,4333,30.23,2026-11-15T05:00:04,dove_abiti_20261115_012359
+piacere_di_conoscerti_20261115_011826,1,piacere di conoscerti,108,3567,30.28,2026-11-15T05:00:04,piacere_di_conoscerti_20261115_011826
+venerdi_alle_19_facciamo_aperiti_20261115_012030,2,venerdì alle 19 facciamo aperitivo,323,10733,30.09,2026-11-15T05:00:05,venerdi_alle_19_facciamo_aperiti_20261115_012030
