@@ -83,7 +83,7 @@ The repository ships a **demo** export: 13 samples synthesized by the mock model
 
 ### GitHub Pages
 
-The build uses a relative base (`base: './'` in `vite.config.ts`), so `dist/` works under any path (`https://<user>.github.io/<repo>/`). The workflow `.github/workflows/pages.yml` builds `website/` and deploys `dist/`; in the repository settings set **Pages → Source: GitHub Actions**, then run it from the Actions tab (or enable its `push` trigger).
+The build uses a relative base (`base: './'` in `vite.config.ts`), so `dist/` works under any path (`https://<user>.github.io/<repo>/`). The workflow `.github/workflows/pages.yml` builds `website/` (tests included) and deploys `dist/` on every push to `main`. One-time setup by a repository admin: **Settings → Pages → Build and deployment → Source: GitHub Actions** (with "Deploy from a branch", Pages serves the repository files, not the built site). The site is then at `https://<owner>.github.io/<repo>/`.
 
 ## Motion model (text → motion)
 

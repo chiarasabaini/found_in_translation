@@ -1,12 +1,13 @@
-# Builds the website and deploys it to GitHub Pages.
-# Setup: repository Settings -> Pages -> Source: "GitHub Actions". Then run this workflow from
-# the Actions tab, or uncomment the push trigger to deploy on every push to main.
+# Builds the website and deploys it to GitHub Pages on every push to main.
+# One-time setup (repository admin): Settings -> Pages -> Build and deployment ->
+# Source: "GitHub Actions". With the "Deploy from a branch" source, Pages serves the
+# repository files (the README), not the built site.
 name: Deploy website to GitHub Pages
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-  # push:
-  #   branches: [main]
 
 permissions:
   contents: read
