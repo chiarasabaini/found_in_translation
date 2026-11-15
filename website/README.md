@@ -50,7 +50,7 @@ Retargeting method (`src/recording/recordingRetarget.ts`): bone directions from 
 
 ## Motion model (text → motion)
 
-In the **Interpreter**, the default mode is **Motion model**: the typed phrase goes to a text-to-motion model, the model returns recording-format files, and the site animates the avatar with the same import and retargeting used for real recordings. **Dictionary clips** mode keeps the old behavior (closed dictionary → stored animation).
+In the **Interpreter**, the default mode is **Motion model**: the typed phrase goes to a text-to-motion model, the model returns recording-format files, and the site animates the avatar with the same import and retargeting used for real recordings. **Dictionary** mode keeps the old behavior (closed dictionary → stored animation) and lists the dictionary phrases. In model mode the panel shows only the prompt and, after signing, the gloss sequence, the words not signed and the model output files.
 
 The real model does not exist yet. Until then, `src/generation/mockMotionModel.ts` plays its role in the browser: it splits the phrase into dictionary signs and synthesizes the CSV files at 30 Hz from placeholder handshapes, the dictionary anchors and motion arcs, and arm IK. **The mock handshapes are not validated LIS signs.** The interpreter shows the gloss sequence, the words it could not sign, and buttons to download the generated CSV files.
 

@@ -21,8 +21,6 @@ import { DEFAULT_RETARGET_OPTIONS, retargetRecording } from './recording/recordi
 
 // Secondary views load on first use, so the interpreter starts faster.
 const QaComparisonView = lazy(() => import('./components/QaComparisonView').then((m) => ({ default: m.QaComparisonView })));
-const DictionaryView = lazy(() => import('./components/DictionaryView').then((m) => ({ default: m.DictionaryView })));
-const ArchitectureView = lazy(() => import('./components/ArchitectureView').then((m) => ({ default: m.ArchitectureView })));
 const RecordingStudioView = lazy(() =>
   import('./components/RecordingStudioView').then((m) => ({ default: m.RecordingStudioView })),
 );
@@ -51,6 +49,8 @@ export default function App() {
   const [playTrigger, setPlayTrigger] = useState(0);
 
   const [interpreterMode, setInterpreterMode] = useState<InterpreterMode>('model');
+  const interpreterModeRef = useRef(interpreterMode);
+  interpreterModeRef.current = interpreterMode;
   const [generating, setGenerating] = useState(false);
   const [generation, setGeneration] = useState<GenerationResult | null>(null);
   const generationAbortRef = useRef<AbortController | null>(null);
@@ -129,7 +129,8 @@ export default function App() {
         setAllRecordedClips(stored);
         setDictionary(dictData);
         setQaSummary(qaData);
-        if (dictData.classes.length > 0) {
+        // Dictionary mode starts on the first sign; model mode waits for a phrase.
+        if (interpreterModeRef.current === 'dictionary' && dictData.classes.length > 0) {
           void loadClassAnimation(dictData.classes[0], false);
         }
       } catch (err) {
@@ -352,17 +353,6 @@ export default function App() {
         </main>
       )}
 
-      {viewMode === 'dictionary' && (
-        <main className="flex-1 flex overflow-hidden">
-          <DictionaryView
-            classes={classes}
-            recordedIds={recordedIds}
-            signLanguage={signLanguage.code}
-            onPlayInInterpreter={playInInterpreter}
-          />
-        </main>
-      )}
-
       {viewMode === 'recordings' && (
         <main className="flex-1 flex overflow-hidden">
           <RecordingStudioView
@@ -378,11 +368,6 @@ export default function App() {
         </main>
       )}
 
-      {viewMode === 'architecture' && (
-        <main className="flex-1 flex overflow-hidden">
-          <ArchitectureView />
-        </main>
-      )}
       </Suspense>
     </div>
   );

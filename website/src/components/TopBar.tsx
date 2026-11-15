@@ -5,7 +5,7 @@ import { BUILTIN_AVATARS, DEFAULT_AVATAR_ID, type AvatarChoice } from '../avatar
 
 const FILE_OPTION = '__file__';
 
-export type AppViewMode = 'interpreter' | 'recordings' | 'qa' | 'dictionary' | 'architecture';
+export type AppViewMode = 'interpreter' | 'recordings' | 'qa';
 
 interface TopBarProps {
   activeView: AppViewMode;
@@ -20,8 +20,6 @@ const NAV_ITEMS: Array<{ id: AppViewMode; label: string }> = [
   { id: 'interpreter', label: 'Interpreter' },
   { id: 'recordings', label: 'Recordings' },
   { id: 'qa', label: 'QA comparison' },
-  { id: 'dictionary', label: 'Dictionary' },
-  { id: 'architecture', label: 'Architecture' },
 ];
 
 const selectClass =
