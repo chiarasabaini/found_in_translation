@@ -1,0 +1,6 @@
+sample_id,prompt_index,sentence,num_frames,duration_ms,avg_fps,created_at,session_dir
+piacere_di_conoscerti_20261115_011826,1,piacere di conoscerti,341,6977,48.87,2026-11-15T01:18:33,piacere_di_conoscerti_20261115_011826
+venerdi_alle_19_facciamo_aperiti_20261115_012030,2,venerdì alle 19 facciamo aperitivo,587,12116,48.45,2026-11-15T01:20:42,venerdi_alle_19_facciamo_aperiti_20261115_012030
+con_chi_vieni_all_aperitivo_20261115_012151,3,con chi vieni all'aperitivo?,472,9780,48.26,2026-11-15T01:22:01,con_chi_vieni_all_aperitivo_20261115_012151
+cosa_fai_domani_20261115_012313,4,cosa fai domani?,289,6106,47.33,2026-11-15T01:23:19,cosa_fai_domani_20261115_012313
+dove_abiti_20261115_012359,5,dove abiti?,294,6180,47.57,2026-11-15T01:24:05,dove_abiti_20261115_012359
