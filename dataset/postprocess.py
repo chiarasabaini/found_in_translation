@@ -11,28 +11,42 @@ from core.postprocessor import (
     postprocess_session_dir,
 )
 
+DEFAULT_RAW_DIR = Path("./output/row")
 
-def _discover_sessions(input_path: Path) -> list[Path]:
+
+def _resolve_input_root(input_path: Path) -> Path:
+    if input_path == DEFAULT_OUTPUT_DIR and (input_path / "row").is_dir():
+        return input_path / "row"
+    return input_path
+
+
+def _discover_sessions(input_path: Path, exclude_dir: Path | None = None) -> list[Path]:
     if (input_path / "face.csv").exists():
         return [input_path]
     if not input_path.exists():
         return []
+
+    exclude_resolved = exclude_dir.resolve() if exclude_dir and exclude_dir.exists() else None
     found: list[Path] = []
-    for child in sorted(input_path.iterdir()):
-        if not child.is_dir():
-            continue
-        if (child / "face.csv").exists():
-            found.append(child)
-        else:
-            for sub in sorted(child.iterdir()):
-                if sub.is_dir() and (sub / "face.csv").exists():
-                    found.append(sub)
+
+    def _walk(curr: Path) -> None:
+        if exclude_resolved is not None and curr.resolve() == exclude_resolved:
+            return
+        if (curr / "face.csv").exists():
+            found.append(curr)
+            return
+        for child in sorted(curr.iterdir()):
+            if child.is_dir():
+                _walk(child)
+
+    _walk(input_path)
     return found
 
 
 def main() -> None:
+    default_in = DEFAULT_RAW_DIR if DEFAULT_RAW_DIR.exists() else DEFAULT_OUTPUT_DIR
     parser = argparse.ArgumentParser(
-        description="Post-process recorded sign-language CSV sessions for neural network training (gap interpolation, static calibration-pose trimming, canonical face normalization, quaternion continuity, and constant-FPS resampling)."
+        description="Post-process recorded sign-language CSV sessions for neural network training, preserving the folder structure from output/row into output/processed."
     )
     parser.add_argument(
         "session_dir",
@@ -44,14 +58,14 @@ def main() -> None:
     parser.add_argument(
         "--input-dir",
         type=Path,
-        default=DEFAULT_OUTPUT_DIR,
-        help="Root directory containing raw recorded session folders (default: ./output)",
+        default=default_in,
+        help="Root directory containing raw recorded session folders (default: ./output/row)",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=DEFAULT_PROCESSED_DIR,
-        help="Destination directory for post-processed sessions and manifest.csv (default: ./output_processed)",
+        help="Destination directory for post-processed sessions (default: ./output/processed)",
     )
     parser.add_argument(
         "--fps",
@@ -66,8 +80,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    target_source = args.session_dir if args.session_dir is not None else args.input_dir
-    sessions = _discover_sessions(target_source)
+    base_root = _resolve_input_root(args.input_dir)
+    target_source = (
+        _resolve_input_root(args.session_dir)
+        if args.session_dir is not None
+        else base_root
+    )
+    sessions = _discover_sessions(target_source, exclude_dir=args.output_dir)
     if not sessions:
         print(
             f"Error: no valid session folders with face.csv found in '{target_source}'.",
@@ -76,18 +95,27 @@ def main() -> None:
         sys.exit(1)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = args.output_dir / "manifest.csv"
-    if args.session_dir is None and manifest_path.exists():
-        manifest_path.unlink()
+    cleared_manifests: set[Path] = set()
 
     print(
-        f"[POSTPROCESS] Processing {len(sessions)} session(s) -> {args.output_dir.resolve()} "
+        f"[POSTPROCESS] Processing {len(sessions)} session(s) from '{target_source}' -> '{args.output_dir}' "
         f"(target_fps={args.fps:.1f} Hz, trim_static_pose={not args.no_trim})"
     )
 
     processed_ok = 0
     for idx, src_dir in enumerate(sessions, start=1):
-        dst_dir = args.output_dir / src_dir.name
+        try:
+            rel_path = src_dir.resolve().relative_to(base_root.resolve())
+        except ValueError:
+            rel_path = Path(src_dir.name)
+
+        dst_dir = args.output_dir / rel_path
+        manifest_path = dst_dir.parent / "manifest.csv"
+        if manifest_path not in cleared_manifests:
+            cleared_manifests.add(manifest_path)
+            if manifest_path.exists():
+                manifest_path.unlink()
+
         try:
             stats = postprocess_session_dir(
                 src_session_dir=src_dir,
@@ -98,7 +126,7 @@ def main() -> None:
             )
             processed_ok += 1
             print(
-                f"  [{idx:03d}/{len(sessions):03d}] {src_dir.name}: "
+                f"  [{idx:03d}/{len(sessions):03d}] {rel_path}: "
                 f"raw={stats.raw_frames}f ({stats.raw_duration_ms}ms @ {stats.raw_fps:.1f}fps) "
                 f"| trimmed=-{stats.trimmed_start_frames}start/-{stats.trimmed_end_frames}end "
                 f"| filled=(F:{stats.interpolated_face_frames},B:{stats.interpolated_body_frames},"
@@ -106,7 +134,7 @@ def main() -> None:
                 f"-> proc={stats.processed_frames}f ({stats.processed_duration_ms}ms @ {stats.target_fps:.1f}fps)"
             )
         except Exception as exc:
-            print(f"  [ERROR] Failed to process '{src_dir.name}': {exc}", file=sys.stderr)
+            print(f"  [ERROR] Failed to process '{rel_path}': {exc}", file=sys.stderr)
 
     print(
         f"\n[DONE] Successfully post-processed {processed_ok}/{len(sessions)} session(s) into '{args.output_dir}'."

@@ -3,6 +3,10 @@ __pycache__/
 *.pyc
 models/
 output/
-output_processed/
 examples/
 config/
+
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
