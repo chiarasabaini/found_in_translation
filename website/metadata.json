@@ -1,6 +1,6 @@
 {
-  "name": "LIS Motion Studio",
-  "description": "Retrieval, retargeting and 3D playback of Italian Sign Language (LIS) from Smartgloves II gloves and Face Mesh. English UI, configurable source language.",
+  "name": "Found in Translation",
+  "description": "Type a phrase and a 3D avatar signs it in Italian Sign Language (LIS). Chat-style translator with source and sign language pickers.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

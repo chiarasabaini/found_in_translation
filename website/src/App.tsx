@@ -1,203 +1,82 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  DictionaryClass,
-  DictionaryPayload,
-  MatchResult,
-  QaSummaryPayload,
-  SignAnimationPayload,
-} from './types/lis';
-import { matchPhrase } from './utils/matcher';
-import { TopBar, type AppViewMode } from './components/TopBar';
-import { PhraseInputPanel } from './components/PhraseInputPanel';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { DictionaryPayload, SignAnimationPayload } from './types/lis';
 import { AvatarViewport } from './components/AvatarViewport';
-import { deleteRecordedClip, downloadText, loadRecordedClips, saveRecordedClip } from './recording/clipStore';
+import { TranslateComposer, type TranslationResult } from './components/TranslateComposer';
+import { SettingsMenu } from './components/SettingsMenu';
 import { getSignLanguage, localizeClass, useLanguageSettings } from './i18n/languages';
 import { useAvatarChoice } from './avatars/avatarCatalog';
-import type { DictionarySequence, GenerationResult, InterpreterMode } from './components/PhraseInputPanel';
 import { configuredModelUrl, HttpMotionModel, type GeneratedMotion, type MotionGenerator } from './generation/motionModel';
-import { motionToAnimation } from './generation/motionToAnimation';
-import { stitchClips, type TransitionCurve } from './generation/stitchClips';
-import { glossOf, planSigns, type PlannedSign } from './generation/signPlanner';
 import { MockMotionModel } from './generation/mockMotionModel';
+import { motionOutputFiles, motionToAnimation } from './generation/motionToAnimation';
+import type { TransitionCurve } from './generation/stitchClips';
+import { downloadText } from './utils/download';
 
-// Secondary views load on first use, so the interpreter starts faster.
-const QaComparisonView = lazy(() => import('./components/QaComparisonView').then((m) => ({ default: m.QaComparisonView })));
-const RecordingStudioView = lazy(() =>
-  import('./components/RecordingStudioView').then((m) => ({ default: m.RecordingStudioView })),
-);
-
-const ViewFallback = () => (
-  <div className="flex-1 flex items-center justify-center text-sm text-slate-500">Loading…</div>
-);
-
-/** Recorded clips are stored per sign language: "<sign language>:<class id>". */
-const clipKey = (signLanguage: string, classId: string) => `${signLanguage}:${classId}`;
-
+/**
+ * Found in Translation: one page, like a text translator.
+ * The phrase goes to the motion model; its output (one clip per sign, or one recording) is
+ * retargeted and joined, and the avatar signs it.
+ */
 export default function App() {
-  const [viewMode, setViewMode] = useState<AppViewMode>('interpreter');
   const [languages, setLanguages] = useLanguageSettings();
   const signLanguage = getSignLanguage(languages.signLanguage);
 
   const [dictionary, setDictionary] = useState<DictionaryPayload | null>(null);
-  const [qaSummary, setQaSummary] = useState<QaSummaryPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [query, setQuery] = useState('');
-  const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
-  const [activeClassId, setActiveClassId] = useState<string | null>(null);
-  const [activeAnimation, setActiveAnimation] = useState<SignAnimationPayload | null>(null);
-  const [loadingAnim, setLoadingAnim] = useState(false);
+  const [animation, setAnimation] = useState<SignAnimationPayload | null>(null);
   const [playTrigger, setPlayTrigger] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<TranslationResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastMotion, setLastMotion] = useState<{ text: string; motion: GeneratedMotion } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const [interpreterMode, setInterpreterMode] = useState<InterpreterMode>('model');
-  const interpreterModeRef = useRef(interpreterMode);
-  interpreterModeRef.current = interpreterMode;
-  const [generating, setGenerating] = useState(false);
-  const [generation, setGeneration] = useState<GenerationResult | null>(null);
   const [transitionCurve, setTransitionCurve] = useState<TransitionCurve>('quintic');
-  const transitionCurveRef = useRef(transitionCurve);
-  transitionCurveRef.current = transitionCurve;
-  const lastMotionRef = useRef<{ text: string; motion: GeneratedMotion } | null>(null);
-  // Dictionary mode: a phrase with several dictionary signs plays their clips joined.
-  const [dictSequence, setDictSequence] = useState<DictionarySequence | null>(null);
-  const lastSequenceRef = useRef<{ text: string; payloads: SignAnimationPayload[]; signs: DictionarySequence['signs']; unmatched: string[] } | null>(null);
-  const generationAbortRef = useRef<AbortController | null>(null);
-
   const [avatar, setAvatar] = useAvatarChoice();
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [avatarInfo, setAvatarInfo] = useState('');
 
-  const animCacheRef = useRef<Map<string, SignAnimationPayload>>(new Map());
-
-  // Clips recorded with the gloves replace the pipeline animation of their class.
-  const [allRecordedClips, setAllRecordedClips] = useState<Record<string, SignAnimationPayload>>({});
-  const allRecordedClipsRef = useRef(allRecordedClips);
-  allRecordedClipsRef.current = allRecordedClips;
-  const signCodeRef = useRef(signLanguage.code);
-  signCodeRef.current = signLanguage.code;
-
-  const recordedClips = useMemo(() => {
-    const prefix = `${signLanguage.code}:`;
-    const out: Record<string, SignAnimationPayload> = {};
-    for (const [key, clip] of Object.entries(allRecordedClips)) {
-      if (key.startsWith(prefix)) out[key.slice(prefix.length)] = clip;
-    }
-    return out;
-  }, [allRecordedClips, signLanguage.code]);
-
-  /** Stored clip of a class: the assigned glove recording if any, otherwise the cached pipeline clip. */
-  const cachedClassPayload = useCallback((cls: DictionaryClass): SignAnimationPayload | null => {
-    const key = clipKey(signCodeRef.current, cls.id);
-    return allRecordedClipsRef.current[key] ?? animCacheRef.current.get(key) ?? null;
+  // The composer height sets where the player sits.
+  const composerRef = useRef<HTMLDivElement | null>(null);
+  const [composerHeight, setComposerHeight] = useState(120);
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(() => setComposerHeight(el.getBoundingClientRect().height));
+    obs.observe(el);
+    return () => obs.disconnect();
   }, []);
 
-  const getClassPayload = useCallback(async (cls: DictionaryClass): Promise<SignAnimationPayload> => {
-    const cached = cachedClassPayload(cls);
-    if (cached) return cached;
-    const res = await fetch(cls.animationUrl);
-    if (!res.ok) throw new Error(`Cannot load ${cls.animationUrl}`);
-    const payload = (await res.json()) as SignAnimationPayload;
-    animCacheRef.current.set(clipKey(signCodeRef.current, cls.id), payload);
-    return payload;
-  }, [cachedClassPayload]);
-
-  const loadClassAnimation = useCallback(async (cls: DictionaryClass, autoPlay: boolean) => {
-    setActiveClassId(cls.id);
-    setDictSequence(null);
-    lastSequenceRef.current = null;
-    lastMotionRef.current = null;
-    const fromCache = cachedClassPayload(cls);
-    if (fromCache) {
-      setActiveAnimation(fromCache);
-      if (autoPlay) setPlayTrigger((n) => n + 1);
-      return;
-    }
-    setLoadingAnim(true);
-    try {
-      const payload = await getClassPayload(cls);
-      setActiveAnimation(payload);
-      if (autoPlay) setPlayTrigger((n) => n + 1);
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Cannot load the animation');
-    } finally {
-      setLoadingAnim(false);
-    }
-  }, [cachedClassPayload, getClassPayload]);
-
-  // Load the dictionary of the selected sign language (and the stored recordings once).
+  // Dictionary of the sign language: the vocabulary of the mock model.
   useEffect(() => {
     let cancelled = false;
-    const init = async () => {
-      setLoadError(null);
-      setDictionary(null);
-      setActiveAnimation(null);
-      setActiveClassId(null);
-      setMatchResult(null);
-      try {
-        const [dictRes, qaRes, stored] = await Promise.all([
-          fetch(signLanguage.dictionaryUrl),
-          fetch(signLanguage.qaSummaryUrl),
-          loadRecordedClips().catch(() => ({}) as Record<string, SignAnimationPayload>),
-        ]);
-        if (!dictRes.ok) throw new Error(`Dictionary not found: ${signLanguage.dictionaryUrl}`);
-        const dictData = (await dictRes.json()) as DictionaryPayload;
-        const qaData = qaRes.ok ? ((await qaRes.json()) as QaSummaryPayload) : null;
-        if (cancelled) return;
-        allRecordedClipsRef.current = stored;
-        setAllRecordedClips(stored);
-        setDictionary(dictData);
-        setQaSummary(qaData);
-        // Dictionary mode starts on the first sign; model mode waits for a phrase.
-        if (interpreterModeRef.current === 'dictionary' && dictData.classes.length > 0) {
-          void loadClassAnimation(dictData.classes[0], false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setLoadError(err instanceof Error ? err.message : 'Cannot initialize the app data');
-        }
-      }
-    };
-    void init();
+    setDictionary(null);
+    setLoadError(null);
+    fetch(signLanguage.dictionaryUrl)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Dictionary not found: ${signLanguage.dictionaryUrl}`);
+        return res.json() as Promise<DictionaryPayload>;
+      })
+      .then((d) => !cancelled && setDictionary(d))
+      .catch((err) => !cancelled && setLoadError(err instanceof Error ? err.message : 'Cannot load the app data'));
     return () => {
       cancelled = true;
     };
-  }, [loadClassAnimation, signLanguage.dictionaryUrl, signLanguage.qaSummaryUrl]);
+  }, [signLanguage.dictionaryUrl]);
 
-  // The typed phrase belongs to the previous source language: start again.
+  // New languages: the last phrase and result no longer apply.
   useEffect(() => {
     setQuery('');
-    setMatchResult(null);
-    setGeneration(null);
-    lastMotionRef.current = null;
-    setDictSequence(null);
-    lastSequenceRef.current = null;
+    setResult(null);
+    setError(null);
+    setLastMotion(null);
   }, [languages.sourceLanguage, languages.signLanguage]);
 
-  // Dictionary text in the source language; durations of recorded clips where present.
   const classes = useMemo(() => {
     const base = dictionary?.metadata.base_language ?? 'it';
-    return (dictionary?.classes ?? []).map((c) => {
-      const localized = localizeClass(c, languages.sourceLanguage, base);
-      const rec = recordedClips[c.id];
-      return rec ? { ...localized, duration: rec.duration, prototypeClipId: rec.prototypeClipId } : localized;
-    });
-  }, [dictionary, recordedClips, languages.sourceLanguage]);
-  const recordedIds = useMemo(() => new Set(Object.keys(recordedClips)), [recordedClips]);
-
-  // Animation payloads carry the base-language text: show the source-language text instead.
-  const displayedAnimation = useMemo(() => {
-    if (!activeAnimation) return null;
-    const cls = classes.find((c) => c.id === activeAnimation.classId);
-    if (!cls) return activeAnimation;
-    return { ...activeAnimation, phrase: cls.phrase, category: cls.category, description: cls.description };
-  }, [activeAnimation, classes]);
-
-  const runMatch = (text: string) =>
-    matchPhrase(
-      text,
-      classes,
-      dictionary?.metadata.match_threshold ?? 0.52,
-      dictionary?.metadata.max_suggestions ?? 3,
-    );
+    return (dictionary?.classes ?? []).map((c) => localizeClass(c, languages.sourceLanguage, base));
+  }, [dictionary, languages.sourceLanguage]);
 
   // The real model when VITE_MOTION_MODEL_URL is set, otherwise the in-browser mock.
   const generator: MotionGenerator = useMemo(() => {
@@ -205,258 +84,107 @@ export default function App() {
     return url ? new HttpMotionModel(url) : new MockMotionModel(classes);
   }, [classes]);
 
-  /** Shows the animation built from a model output (stitching per-sign clips if needed). */
-  const showMotion = useCallback((text: string, motion: GeneratedMotion, curve: TransitionCurve, autoPlay: boolean) => {
-    const anim = motionToAnimation(motion, text, curve);
-    setGeneration({ text, motion: anim ? { ...motion, segments: anim.segments } : motion });
-    if (!anim) return;
-    setActiveClassId(null);
-    setActiveAnimation(anim.payload);
-    if (autoPlay) setPlayTrigger((n) => n + 1);
+  /** Model output -> animation (per-sign clips are joined with the chosen transition curve). */
+  const show = useCallback((text: string, motion: GeneratedMotion, curve: TransitionCurve) => {
+    try {
+      const anim = motionToAnimation(motion, text, curve);
+      setResult({
+        text,
+        segments: anim ? anim.segments : motion.segments,
+        unmatched: motion.unmatched,
+        empty: !anim,
+      });
+      setError(null);
+      if (anim) {
+        setAnimation(anim.payload);
+        setPlayTrigger((n) => n + 1);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Cannot animate the model output');
+    }
   }, []);
 
-  /** Text -> motion model -> recording-format CSV -> same import and retargeting as real recordings. */
-  const handleGenerate = async (text: string) => {
-    if (!text.trim()) return;
-    generationAbortRef.current?.abort();
+  const handleTranslate = async () => {
+    const text = query.trim();
+    if (!text || !dictionary) return;
+    abortRef.current?.abort();
     const ctrl = new AbortController();
-    generationAbortRef.current = ctrl;
-    setGenerating(true);
-    setLoadError(null);
+    abortRef.current = ctrl;
+    setBusy(true);
+    setError(null);
     try {
       const motion = await generator.generate(
         { text, sourceLanguage: languages.sourceLanguage, signLanguage: signLanguage.code },
         ctrl.signal,
       );
       if (ctrl.signal.aborted) return;
-      lastMotionRef.current = { text, motion };
-      lastSequenceRef.current = null;
-      setDictSequence(null);
-      showMotion(text, motion, transitionCurveRef.current, true);
+      setLastMotion({ text, motion });
+      show(text, motion, transitionCurve);
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') return;
-      setLoadError(err instanceof Error ? err.message : 'Motion generation failed');
+      setError(err instanceof Error ? err.message : 'Translation failed');
     } finally {
-      if (generationAbortRef.current === ctrl) setGenerating(false);
+      if (abortRef.current === ctrl) setBusy(false);
     }
   };
 
-  /** Joins the stored clips of several dictionary signs. */
-  const showSequence = useCallback(
-    (seq: NonNullable<typeof lastSequenceRef.current>, curve: TransitionCurve, autoPlay: boolean) => {
-      const r = stitchClips(seq.payloads.map((payload) => ({ payload })), { curve });
-      r.payload.classId = 'sequence';
-      r.payload.phrase = seq.text;
-      r.payload.category = 'Dictionary sequence';
-      r.payload.description = seq.signs.map((x) => x.gloss).join(' · ');
-      setDictSequence({
-        signs: seq.signs.map((x, i) => ({
-          ...x,
-          startSec: Math.round(r.segments[i].startSec * 100) / 100,
-          endSec: Math.round(r.segments[i].endSec * 100) / 100,
-        })),
-        unmatched: seq.unmatched,
-      });
-      setActiveClassId(null);
-      setActiveAnimation(r.payload);
-      if (autoPlay) setPlayTrigger((n) => n + 1);
-    },
-    [],
-  );
-
-  const playDictionarySequence = async (text: string, signs: PlannedSign[], unmatched: string[]) => {
-    setLoadingAnim(true);
-    try {
-      const payloads = await Promise.all(signs.map((x) => getClassPayload(x.cls)));
-      const seq = {
-        text,
-        payloads,
-        signs: signs.map((x) => ({ text: x.text, phrase: x.cls.phrase, gloss: glossOf(x.cls), classId: x.cls.id, startSec: 0, endSec: 0 })),
-        unmatched,
-      };
-      lastSequenceRef.current = seq;
-      lastMotionRef.current = null;
-      showSequence(seq, transitionCurveRef.current, true);
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Cannot load the sign clips');
-    } finally {
-      setLoadingAnim(false);
-    }
-  };
-
-  // A new transition curve re-joins the last model output (no new request to the model).
-  useEffect(() => {
-    const last = lastMotionRef.current;
-    if (!last?.motion.clips?.length) return;
-    try {
-      showMotion(last.text, last.motion, transitionCurve, true);
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Cannot join the model clips');
-    }
-  }, [transitionCurve, showMotion]);
-
-  // ...and the last dictionary sequence.
-  useEffect(() => {
-    const last = lastSequenceRef.current;
-    if (last) showSequence(last, transitionCurve, true);
-  }, [transitionCurve, showSequence]);
-
-  const handleSubmitQuery = (textOverride?: string) => {
-    if (!dictionary) return;
-    const text = textOverride !== undefined ? textOverride : query;
-    if (textOverride !== undefined) setQuery(textOverride);
-    if (interpreterMode === 'model') {
-      void handleGenerate(text);
-      return;
-    }
-    // Several dictionary phrases in the text: join their clips.
-    const plan = planSigns(text, classes);
-    if (plan.signs.length >= 2) {
-      setMatchResult(null);
-      void playDictionarySequence(text, plan.signs, plan.unmatched);
-      return;
-    }
-    const res = runMatch(text);
-    setMatchResult(res);
-    setDictSequence(null);
-    lastSequenceRef.current = null;
-    if (res.matched && res.best) {
-      const targetCls = classes.find((c) => c.id === res.best?.classId);
-      if (targetCls) void loadClassAnimation(targetCls, true);
-    }
-  };
-
-  const handleSelectClass = (cls: DictionaryClass) => {
-    setQuery(cls.phrase);
-    if (interpreterMode === 'model') {
-      void handleGenerate(cls.phrase);
-      return;
-    }
-    if (dictionary) setMatchResult(runMatch(cls.phrase));
-    void loadClassAnimation(cls, true);
-  };
-
-  const handleAssignRecordedClip = async (cls: DictionaryClass, payload: SignAnimationPayload) => {
-    const key = clipKey(signLanguage.code, cls.id);
-    const next = { ...allRecordedClipsRef.current, [key]: payload };
-    allRecordedClipsRef.current = next;
-    setAllRecordedClips(next);
-    if (activeClassId === cls.id) setActiveAnimation(payload);
-    return saveRecordedClip(key, payload);
-  };
-
-  const handleRemoveRecordedClip = (classId: string) => {
-    const key = clipKey(signLanguage.code, classId);
-    const next = { ...allRecordedClipsRef.current };
-    delete next[key];
-    allRecordedClipsRef.current = next;
-    setAllRecordedClips(next);
-    void deleteRecordedClip(key);
-    if (activeClassId === classId) {
-      const cls = classes.find((c) => c.id === classId);
-      if (cls) void loadClassAnimation(cls, false);
-    }
-  };
-
-  // Other views play stored clips: show them in dictionary mode.
-  const playInInterpreter = (cls: DictionaryClass) => {
-    setViewMode('interpreter');
-    setInterpreterMode('dictionary');
-    setQuery(cls.phrase);
-    if (dictionary) setMatchResult(runMatch(cls.phrase));
-    void loadClassAnimation(cls, true);
+  const handleChangeCurve = (curve: TransitionCurve) => {
+    setTransitionCurve(curve);
+    // Re-join the last output without a new model request.
+    if (lastMotion?.motion.clips?.length) show(lastMotion.text, lastMotion.motion, curve);
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-slate-50 text-slate-900">
-      <TopBar
-        activeView={viewMode}
-        onChangeView={setViewMode}
-        languages={languages}
-        onChangeLanguages={setLanguages}
-        avatar={avatar}
-        onChangeAvatar={(next) => {
-          setAvatarError(null);
-          setAvatar(next);
-        }}
-      />
+    <div className="relative h-dvh w-screen overflow-hidden bg-[#E8EEF5] text-slate-900">
+      <div className="absolute inset-0">
+        <AvatarViewport
+          animation={animation}
+          playTrigger={playTrigger}
+          avatar={avatar}
+          avatarError={avatarError}
+          onAvatarError={setAvatarError}
+          bottomInset={composerHeight + 28}
+          onAvatarInfo={setAvatarInfo}
+        />
+      </div>
 
-      {loadError && (
-        <div role="alert" className="bg-red-50 border-b border-red-200 px-6 py-2 text-xs text-red-800">
-          {loadError}
+      <header className="absolute top-0 inset-x-0 z-20 pointer-events-none flex justify-center pt-4 px-16">
+        <h1 className="font-display text-xl sm:text-2xl font-semibold tracking-tight text-slate-900 text-center">
+          Found in Translation
+        </h1>
+      </header>
+
+      <div className="absolute top-3 right-3 z-30">
+        <SettingsMenu
+          avatar={avatar}
+          onChangeAvatar={(next) => {
+            setAvatarError(null);
+            setAvatar(next);
+          }}
+          avatarInfo={avatarInfo}
+          transitionCurve={transitionCurve}
+          onChangeTransitionCurve={handleChangeCurve}
+          modelName={generator.name}
+          isMockModel={generator.isMock}
+          outputFiles={lastMotion ? motionOutputFiles(lastMotion.motion) : []}
+          onDownloadFile={(f) => downloadText(f.name, f.text)}
+        />
+      </div>
+
+      <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4 sm:pb-6 pointer-events-none">
+        <div ref={composerRef} className="w-full max-w-2xl pointer-events-auto">
+          <TranslateComposer
+            languages={languages}
+            onChangeLanguages={setLanguages}
+            value={query}
+            onChange={setQuery}
+            onSubmit={() => void handleTranslate()}
+            busy={busy || !dictionary}
+            result={result}
+            error={error ?? loadError}
+          />
         </div>
-      )}
-
-      {viewMode === 'interpreter' && (
-        <main className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-          <PhraseInputPanel
-            query={query}
-            onChangeQuery={setQuery}
-            onSubmitQuery={handleSubmitQuery}
-            matchResult={matchResult}
-            dictSequence={dictSequence}
-            classes={classes}
-            activeClassId={activeClassId}
-            activeAnimation={displayedAnimation}
-            loadingAnim={loadingAnim}
-            onSelectClass={handleSelectClass}
-            recordedIds={recordedIds}
-            sourceLanguage={languages.sourceLanguage}
-            signLanguage={signLanguage.code}
-            mode={interpreterMode}
-            onChangeMode={setInterpreterMode}
-            modelName={generator.name}
-            isMockModel={generator.isMock}
-            generating={generating}
-            generation={generation}
-            onDownloadFile={(name, text) => downloadText(name, text)}
-            transitionCurve={transitionCurve}
-            onChangeTransitionCurve={setTransitionCurve}
-          />
-          <section aria-label="3D avatar viewport" className="flex-1 min-h-[420px] lg:h-full relative">
-            <AvatarViewport
-              animation={displayedAnimation}
-              playTrigger={playTrigger}
-              avatar={avatar}
-              avatarError={avatarError}
-              onAvatarError={setAvatarError}
-            />
-          </section>
-        </main>
-      )}
-
-      <Suspense fallback={<ViewFallback />}>
-      {viewMode === 'qa' && (
-        <main className="flex-1 flex overflow-hidden">
-          <QaComparisonView
-            classes={classes}
-            activeClassId={activeClassId}
-            activeAnimation={displayedAnimation}
-            qaSummary={qaSummary}
-            onSelectClass={(cls) => void loadClassAnimation(cls, false)}
-            avatar={avatar}
-            avatarError={avatarError}
-            onAvatarError={setAvatarError}
-          />
-        </main>
-      )}
-
-      {viewMode === 'recordings' && (
-        <main className="flex-1 flex overflow-hidden">
-          <RecordingStudioView
-            classes={classes}
-            recordedClips={recordedClips}
-            onAssignClip={handleAssignRecordedClip}
-            onRemoveClip={handleRemoveRecordedClip}
-            onPlayInInterpreter={playInInterpreter}
-            avatar={avatar}
-            avatarError={avatarError}
-            onAvatarError={setAvatarError}
-          />
-        </main>
-      )}
-
-      </Suspense>
+      </div>
     </div>
   );
 }

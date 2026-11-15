@@ -7,8 +7,6 @@ import {
   Pause,
   RotateCcw,
   Bone,
-  ChevronDown,
-  ChevronUp,
   AlertTriangle,
 } from 'lucide-react';
 import type { SignAnimationPayload } from '../types/lis';
@@ -35,16 +33,31 @@ interface AvatarViewportProps {
   onAvatarError: (err: string | null) => void;
   externalTimeSec?: number | null;
   onTimeUpdate?: (timeSec: number) => void;
+  /** Distance of the player from the bottom edge (px), to sit above the composer. */
+  bottomInset?: number;
+  /** Reports the avatar description (format, bones, face rig) when it changes. */
+  onAvatarInfo?: (info: string) => void;
 }
 
 const CAMERA_PRESETS: Record<
   CameraPreset,
   { pos: [number, number, number]; target: [number, number, number]; label: string }
 > = {
-  front: { pos: [0, 1.36, 1.95], target: [0, 1.20, 0.05], label: 'Front' },
+  // Framed for the free area between the title and the composer: hips to raised hands.
+  front: { pos: [0, 1.42, 2.05], target: [0, 1.38, 0.05], label: 'Front' },
   hands: { pos: [0, 1.28, 1.05], target: [0, 1.24, 0.22], label: 'Hands' },
   face: { pos: [0, 1.66, 0.72], target: [0, 1.62, 0.05], label: 'Face' },
 };
+
+/** Camera pose of a preset, pulled back on narrow screens so the arms stay in view. */
+function presetPose(preset: CameraPreset, aspect: number): { pos: THREE.Vector3; target: THREE.Vector3 } {
+  const cfg = CAMERA_PRESETS[preset];
+  const target = new THREE.Vector3(...cfg.target);
+  const pos = new THREE.Vector3(...cfg.pos);
+  const minAspect = preset === 'face' ? 0.6 : 0.8;
+  if (aspect < minAspect) pos.sub(target).multiplyScalar(Math.min(2.2, minAspect / aspect)).add(target);
+  return { pos, target };
+}
 
 function detectSoftwareGl(): boolean {
   try {
@@ -69,6 +82,8 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
   onAvatarError,
   externalTimeSec = null,
   onTimeUpdate,
+  bottomInset = 16,
+  onAvatarInfo,
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
 
@@ -76,7 +91,6 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
   const [speed, setSpeed] = useState<0.5 | 1 | 1.5>(1);
   const [skeletonDebug, setSkeletonDebug] = useState(false);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('front');
-  const [dockCollapsed, setDockCollapsed] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [webglUnavailable, setWebglUnavailable] = useState(false);
   const [avatarInfo, setAvatarInfo] = useState<string>(PROCEDURAL_AVATAR_INFO);
@@ -92,6 +106,11 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
   onTimeUpdateRef.current = onTimeUpdate;
   const animationRef = useRef(animation);
   animationRef.current = animation;
+  const onAvatarInfoRef = useRef(onAvatarInfo);
+  onAvatarInfoRef.current = onAvatarInfo;
+  useEffect(() => {
+    onAvatarInfoRef.current?.(avatarInfo);
+  }, [avatarInfo]);
 
   const sceneApiRef = useRef<{
     scene: THREE.Scene;
@@ -151,10 +170,11 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
     pmrem.dispose();
 
     const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 30);
-    camera.position.set(...CAMERA_PRESETS.front.pos);
+    const initialPose = presetPose('front', width / height);
+    camera.position.copy(initialPose.pos);
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(...CAMERA_PRESETS.front.target);
+    controls.target.copy(initialPose.target);
     controls.enableDamping = !isSoftwareGl;
     controls.dampingFactor = 0.08;
     controls.minDistance = 0.45;
@@ -196,9 +216,6 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
     floorMesh.receiveShadow = true;
     scene.add(floorMesh);
 
-    const gridHelper = new THREE.GridHelper(4.4, 16, 0x94a3b8, 0xcbd5e1);
-    gridHelper.position.y = 0.005;
-    scene.add(gridHelper);
 
     const contactGeo = new THREE.CircleGeometry(0.32, 32);
     const contactMat = new THREE.MeshBasicMaterial({
@@ -350,9 +367,12 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
     };
 
     controls.addEventListener('change', requestRender);
+    // The camera follows the preset (also on resize) until the user orbits it.
+    let activePreset: CameraPreset | null = 'front';
     controls.addEventListener('start', () => {
       cameraGoalPos = null;
       cameraGoalTarget = null;
+      activePreset = null;
     });
 
     const handleResize = () => {
@@ -362,6 +382,13 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      if (activePreset) {
+        const pose = presetPose(activePreset, camera.aspect);
+        camera.position.copy(pose.pos);
+        controls.target.copy(pose.target);
+        cameraGoalPos = null;
+        cameraGoalTarget = null;
+      }
       requestRender();
     };
     const resizeObs = new ResizeObserver(handleResize);
@@ -383,9 +410,10 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
       requestRender,
       startPlaybackLoop,
       setCameraGoal: (preset) => {
-        const cfg = CAMERA_PRESETS[preset];
-        cameraGoalPos = new THREE.Vector3(...cfg.pos);
-        cameraGoalTarget = new THREE.Vector3(...cfg.target);
+        activePreset = preset;
+        const pose = presetPose(preset, camera.aspect);
+        cameraGoalPos = pose.pos;
+        cameraGoalTarget = pose.target;
         if (!isPlayingRef.current) requestRender();
       },
       applyClip: (anim, autoPlay) => {
@@ -617,40 +645,128 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
 
   const duration = animation?.duration ?? 1.5;
 
+  const pillButton = (active: boolean) =>
+    `px-2.5 py-1 text-xs font-medium rounded-full transition-colors cursor-pointer ${
+      active ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+    }`;
+
   return (
     <div
-      className="relative w-full h-full min-h-[460px] bg-[#E8EEF5] overflow-hidden select-none"
+      className="relative w-full h-full bg-[#E8EEF5] overflow-hidden select-none"
       data-testid="avatar-viewport"
       data-playing={isPlaying ? 'true' : 'false'}
       data-sign-id={animation?.classId ?? 'none'}
       data-skeleton-debug={skeletonDebug ? 'true' : 'false'}
+      data-avatar-info={avatarInfo}
     >
       {/* Dedicated WebGL mount container */}
       <div ref={mountRef} className="w-full h-full" />
 
-      {/* Minimal top-left overlay label */}
-      <div className="absolute top-4 left-4 z-10 pointer-events-none">
-        <div className="bg-white/95 border border-slate-200 rounded-lg px-3.5 py-2 shadow-sm">
-          <div className="text-xs text-slate-500">
-            {avatarLoading ? 'Loading avatar…' : avatarInfo}
+      {/* Avatar status: loading, errors, notices */}
+      <div className="absolute top-16 left-4 right-4 sm:right-auto z-10 flex flex-col gap-2 items-start pointer-events-none">
+        {avatarLoading && (
+          <div role="status" className="bg-white/95 border border-slate-200 rounded-full px-3 py-1 text-xs text-slate-600 shadow-sm">
+            Loading avatar…
           </div>
-          <div className="text-sm font-display font-semibold text-slate-900">
-            {animation ? animation.phrase : 'Waiting for a phrase'}
+        )}
+        {avatarError ? (
+          <div role="alert" className="bg-red-50 border border-red-200 rounded-lg px-3.5 py-2 text-xs text-red-800 flex items-center gap-2 max-w-xs">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" aria-hidden="true" />
+            <span>{avatarError}</span>
           </div>
-        </div>
+        ) : avatarNotice ? (
+          <div role="status" className="bg-amber-50 border border-amber-200 rounded-lg px-3.5 py-2 text-xs text-amber-900 flex items-center gap-2 max-w-xs">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" aria-hidden="true" />
+            <span>{avatarNotice}</span>
+          </div>
+        ) : null}
       </div>
 
-      {avatarError ? (
-        <div role="alert" className="absolute top-4 right-4 z-10 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2 text-xs text-red-800 flex items-center gap-2 max-w-xs">
-          <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" aria-hidden="true" />
-          <span>{avatarError}</span>
+      {/* Camera views and skeleton, right side */}
+      <div
+        className="absolute right-3 top-16 z-10 flex flex-col items-stretch gap-1 bg-white/90 border border-slate-200 rounded-2xl p-1 shadow-sm"
+        role="group"
+        aria-label="Camera view"
+      >
+        {(Object.keys(CAMERA_PRESETS) as CameraPreset[]).map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            onClick={() => {
+              setCameraPreset(preset);
+              sceneApiRef.current?.setCameraGoal(preset);
+            }}
+            aria-pressed={cameraPreset === preset}
+            className={pillButton(cameraPreset === preset)}
+          >
+            {CAMERA_PRESETS[preset].label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setSkeletonDebug((v) => !v)}
+          aria-pressed={skeletonDebug}
+          aria-label="Show skeleton"
+          title="Show skeleton"
+          className={`${pillButton(skeletonDebug)} inline-flex justify-center`}
+        >
+          <Bone className="w-3.5 h-3.5" aria-hidden="true" />
+        </button>
+      </div>
+
+      {/* Compact player, above the composer */}
+      {animation && (
+        <div
+          className="absolute left-1/2 -translate-x-1/2 z-10 w-[min(560px,calc(100%-2rem))] bg-white/95 border border-slate-200 rounded-full pl-1.5 pr-3 py-1 shadow-sm flex items-center gap-2"
+          style={{ bottom: bottomInset }}
+        >
+          <button
+            type="button"
+            onClick={handleTogglePlay}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+            className="inline-flex items-center justify-center w-7 h-7 rounded-full text-white bg-slate-900 hover:bg-slate-800 cursor-pointer shrink-0"
+          >
+            {isPlaying ? <Pause className="w-3.5 h-3.5" aria-hidden="true" /> : <Play className="w-3.5 h-3.5" aria-hidden="true" />}
+          </button>
+          <button
+            type="button"
+            onClick={handleReplay}
+            aria-label="Replay"
+            title="Replay"
+            className="inline-flex items-center justify-center w-7 h-7 rounded-full text-slate-700 hover:bg-slate-100 cursor-pointer shrink-0"
+          >
+            <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={duration}
+            step={0.01}
+            value={Math.min(currentTime, duration)}
+            onChange={(e) => {
+              const t = parseFloat(e.target.value);
+              setIsPlaying(false);
+              isPlayingRef.current = false;
+              sceneApiRef.current?.scrubTo(t);
+              onTimeUpdateRef.current?.(t);
+            }}
+            aria-label="Animation timeline"
+            className="flex-1 min-w-0 accent-blue-600 cursor-pointer"
+          />
+          <span className="font-mono text-xs text-slate-500 tabular-nums whitespace-nowrap shrink-0 hidden sm:inline">
+            {currentTime.toFixed(1)} / {duration.toFixed(1)} s
+          </span>
+          <button
+            type="button"
+            onClick={() => setSpeed((v) => (v === 1 ? 0.5 : v === 0.5 ? 1.5 : 1))}
+            title="Playback speed"
+            aria-label={`Playback speed ${speed}x`}
+            className="font-mono text-xs font-medium text-slate-700 hover:text-slate-900 w-9 shrink-0 cursor-pointer"
+          >
+            {speed}x
+          </button>
         </div>
-      ) : avatarNotice ? (
-        <div role="status" className="absolute top-4 right-4 z-10 bg-amber-50 border border-amber-200 rounded-lg px-3.5 py-2 text-xs text-amber-900 flex items-center gap-2 max-w-xs">
-          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" aria-hidden="true" />
-          <span>{avatarNotice}</span>
-        </div>
-      ) : null}
+      )}
 
       {webglUnavailable && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-100 p-6">
@@ -664,146 +780,6 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
           </div>
         </div>
       )}
-
-      {/* Unified Collapsible Bottom Control Dock (solid/opaque bg, no backdrop-filter over WebGL) */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 w-[min(860px,calc(100%-2rem))] flex flex-col items-center">
-        <button
-          type="button"
-          onClick={() => setDockCollapsed((v) => !v)}
-          aria-expanded={!dockCollapsed}
-          className="mb-1.5 inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-slate-700 bg-white/95 hover:bg-white border border-slate-200 rounded-md shadow-sm cursor-pointer"
-        >
-          {dockCollapsed ? (
-            <>
-              <ChevronUp className="w-3.5 h-3.5" aria-hidden="true" />
-              Show controls
-            </>
-          ) : (
-            <>
-              <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
-              Hide controls
-            </>
-          )}
-        </button>
-
-        {!dockCollapsed && (
-          <div className="w-full bg-white/95 border border-slate-200 rounded-xl px-4 py-3 shadow-sm flex flex-wrap items-center justify-between gap-3">
-            {/* Transport controls */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleTogglePlay}
-                disabled={!animation}
-                aria-label={isPlaying ? 'Pause animation' : 'Play animation'}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-40 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                {isPlaying ? (
-                  <>
-                    <Pause className="w-3.5 h-3.5" aria-hidden="true" />
-                    Pause
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-3.5 h-3.5" aria-hidden="true" />
-                    Play
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleReplay}
-                disabled={!animation}
-                aria-label="Replay sign"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                Replay
-              </button>
-            </div>
-
-            {/* Scrubber */}
-            <div className="flex items-center gap-2.5 flex-1 min-w-[160px]">
-              <input
-                type="range"
-                min={0}
-                max={duration}
-                step={0.01}
-                value={Math.min(currentTime, duration)}
-                disabled={!animation}
-                onChange={(e) => {
-                  const t = parseFloat(e.target.value);
-                  setIsPlaying(false);
-                  isPlayingRef.current = false;
-                  sceneApiRef.current?.scrubTo(t);
-                  onTimeUpdateRef.current?.(t);
-                }}
-                aria-label="Animation timeline"
-                className="w-full accent-blue-600 cursor-pointer"
-              />
-              <span className="font-mono text-xs text-slate-600 tabular-nums whitespace-nowrap shrink-0">
-                {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
-              </span>
-            </div>
-
-            {/* Speed & Camera & Skeleton Debug */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg" role="group" aria-label="Playback speed">
-                {([0.5, 1, 1.5] as const).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setSpeed(s)}
-                    aria-pressed={speed === s}
-                    className={`px-2 py-1 text-xs font-mono font-medium rounded-md transition-colors cursor-pointer ${
-                      speed === s
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {s}x
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg" role="group" aria-label="Camera view">
-                {(Object.keys(CAMERA_PRESETS) as CameraPreset[]).map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    onClick={() => {
-                      setCameraPreset(preset);
-                      sceneApiRef.current?.setCameraGoal(preset);
-                    }}
-                    aria-pressed={cameraPreset === preset}
-                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer ${
-                      cameraPreset === preset
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {CAMERA_PRESETS[preset].label}
-                  </button>
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setSkeletonDebug((v) => !v)}
-                aria-pressed={skeletonDebug}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  skeletonDebug
-                    ? 'bg-blue-50 border-blue-200 text-blue-800'
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <Bone className="w-3.5 h-3.5" aria-hidden="true" />
-                Skeleton
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
     </div>
   );
 };

@@ -14,6 +14,7 @@
 - [Found in Translation by Espresso Yourself](#found-in-translation-by-espresso-yourself)
 - [Summary](#summary)
 - [Description](#description)
+- [Repository structure](#repository-structure)
 - [Requirements](#requirements)
 - [Website](#website)
 - [Notes](#notes)
@@ -22,7 +23,20 @@
 
 # Description
 
-Lorem ipsum dolor sit amed.
+**Found in Translation** translates written Italian or English into **Italian Sign Language (LIS)**, signed by a 3D avatar.
+
+We record real LIS signers with **Rokoko Smartgloves** (fingers and hands) and cameras (face expressions and upper body), and build a dataset of signed words and phrases. From the text, the system finds the recordings to play (the whole phrase if it is in the dataset, otherwise its words in LIS order), joins them with smooth transitions, and retargets the motion onto any humanoid avatar, face included. The website works like a text translator: type a phrase, pick the languages, and the avatar signs it.
+
+---
+
+# Repository structure
+
+| Folder | Content |
+|---|---|
+| [`dataset/`](dataset/) | Capture of the LIS dataset (gloves + face and body cameras, synchronized), post-processing and 3D preview. Output: 4 CSV files per sample (`left_hand`, `right_hand`, `face`, `body`). |
+| [`model/`](model/) | Text → LIS animation routing (`lis_router.py`): semantic match of the whole phrase, otherwise spaCy lemmas reordered in LIS order and looked up word by word. |
+| [`website/`](website/) | The web app: text input, motion retargeting, clip joining and 3D avatar playback. |
+| [`assets/`](assets/) | Avatars (`woman.glb`, the default one). |
 
 ---
 
@@ -35,7 +49,7 @@ Lorem ipsum dolor sit amed.
 
 # Website
 
-[`website/`](website/) contains **LIS Motion Studio**, the web app that turns a typed phrase (English or Italian) into Italian Sign Language (LIS) on a 3D avatar. It also imports real Rokoko Smartgloves recordings. A mock text-to-motion model stands in for the real one until it is ready.
+[`website/`](website/) is a one-page translator: a chat-style input with language pickers (English or Italian → LIS), and a 3D avatar that signs the phrase. The per-sign recordings are joined with smooth transitions (quintic minimum-jerk curves). A mock model stands in for the real one in the browser until the backend is connected.
 
 Run it with `cd website && npm install && npm run dev`, then open http://localhost:3000. Details are in [`website/README.md`](website/README.md).
 

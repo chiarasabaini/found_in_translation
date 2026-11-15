@@ -17,22 +17,22 @@ export interface SourceLanguage {
   code: string;
   label: string;
   placeholder: string;
-  /** Example phrases shown as one-click buttons in the interpreter. */
+  /** Example phrases (checked by the tests: the mock model signs all of them). */
   examples: string[];
 }
 
 export interface SignLanguage {
   code: string;
   label: string;
+  /** Dictionary of the sign language (the vocabulary of the mock model). */
   dictionaryUrl: string;
-  qaSummaryUrl: string;
 }
 
 export const SOURCE_LANGUAGES: SourceLanguage[] = [
   {
     code: 'en',
     label: 'English',
-    placeholder: 'e.g. "Thanks a lot" or "Where is the bathroom?"',
+    placeholder: 'Enter text, e.g. "Hello, how are you?"',
     examples: [
       'Hello',
       'Thank you',
@@ -47,7 +47,7 @@ export const SOURCE_LANGUAGES: SourceLanguage[] = [
   {
     code: 'it',
     label: 'Italiano',
-    placeholder: 'es. "Grazie mille" o "Dov\'è il bagno?"',
+    placeholder: 'Scrivi una frase, es. "Ciao, come stai?"',
     examples: [
       'Ciao',
       'Grazie',
@@ -66,7 +66,6 @@ export const SIGN_LANGUAGES: SignLanguage[] = [
     code: 'LIS',
     label: 'LIS – Italian Sign Language',
     dictionaryUrl: '/data/dictionary.json',
-    qaSummaryUrl: '/data/qa_summary.json',
   },
 ];
 
