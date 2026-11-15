@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DictionaryPayload, SignAnimationPayload } from './types/lis';
 import { AvatarViewport } from './components/AvatarViewport';
-import { TranslateComposer, type TranslationResult } from './components/TranslateComposer';
-import { SettingsMenu } from './components/SettingsMenu';
+import { TranslatePanel, type TranslationResult } from './components/TranslatePanel';
+import { SettingsPanel } from './components/SettingsPanel';
 import { getSignLanguage, localizeClass, useLanguageSettings } from './i18n/languages';
 import { useAvatarChoice } from './avatars/avatarCatalog';
 import { configuredModelUrl, HttpMotionModel, type GeneratedMotion, type MotionGenerator } from './generation/motionModel';
@@ -51,16 +51,7 @@ export default function App() {
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [avatarInfo, setAvatarInfo] = useState('');
 
-  // The composer height sets where the player sits.
-  const composerRef = useRef<HTMLDivElement | null>(null);
-  const [composerHeight, setComposerHeight] = useState(120);
-  useEffect(() => {
-    const el = composerRef.current;
-    if (!el) return;
-    const obs = new ResizeObserver(() => setComposerHeight(el.getBoundingClientRect().height));
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
+  const [showSkeleton, setShowSkeleton] = useState(false);
 
   // Dictionary of the sign language: the vocabulary of the mock model.
   useEffect(() => {
@@ -199,48 +190,15 @@ export default function App() {
   };
 
   return (
-    <div className="relative h-dvh w-screen overflow-hidden bg-[#E8EEF5] text-slate-900">
-      <div className="absolute inset-0">
-        <AvatarViewport
-          animation={animation}
-          playTrigger={playTrigger}
-          avatar={avatar}
-          avatarError={avatarError}
-          onAvatarError={setAvatarError}
-          bottomInset={composerHeight + 28}
-          onAvatarInfo={setAvatarInfo}
-        />
-      </div>
-
-      <header className="absolute top-0 inset-x-0 z-20 pointer-events-none flex justify-center pt-4 px-16">
-        <h1 className="font-display text-xl sm:text-2xl font-semibold tracking-tight text-slate-900 text-center">
-          Found in Translation
-        </h1>
-      </header>
-
-      <div className="absolute top-3 right-3 z-30">
-        <SettingsMenu
-          avatar={avatar}
-          onChangeAvatar={(next) => {
-            setAvatarError(null);
-            setAvatar(next);
-          }}
-          avatarInfo={avatarInfo}
-          transitionCurve={transitionCurve}
-          onChangeTransitionCurve={handleChangeCurve}
-          modelName={generator.name}
-          isMockModel={generator.isMock}
-          semantic={generator === routerModel ? semantic : null}
-          onToggleSemantic={(on) => void enableSemantic(on)}
-          lastRoute={lastMotion?.motion.route ?? null}
-          outputFiles={lastMotion ? motionOutputFiles(lastMotion.motion) : []}
-          onDownloadFile={(f) => downloadText(f.name, f.text)}
-        />
-      </div>
-
-      <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4 sm:pb-6 pointer-events-none">
-        <div ref={composerRef} className="w-full max-w-2xl pointer-events-auto">
-          <TranslateComposer
+    <div className="h-dvh w-screen flex flex-col lg:flex-row overflow-hidden bg-[#E8EEF5] text-slate-900">
+      {/* Left column: title, translator, settings */}
+      <aside className="order-last lg:order-first w-full lg:w-[380px] shrink-0 bg-white border-t lg:border-t-0 lg:border-r border-slate-200 flex flex-col max-h-[55dvh] lg:max-h-none overflow-y-auto">
+        <header className="px-5 pt-5 pb-3">
+          <h1 className="font-display text-xl font-semibold tracking-tight text-slate-900">Found in Translation</h1>
+          <p className="mt-0.5 text-sm text-slate-500">Text to Italian Sign Language</p>
+        </header>
+        <div className="px-5 pb-5 flex-1">
+          <TranslatePanel
             languages={languages}
             onChangeLanguages={setLanguages}
             value={query}
@@ -251,7 +209,40 @@ export default function App() {
             error={error ?? loadError}
           />
         </div>
-      </div>
+        <SettingsPanel
+          avatar={avatar}
+          onChangeAvatar={(next) => {
+            setAvatarError(null);
+            setAvatar(next);
+          }}
+          avatarInfo={avatarInfo}
+          showSkeleton={showSkeleton}
+          onToggleSkeleton={setShowSkeleton}
+          transitionCurve={transitionCurve}
+          onChangeTransitionCurve={handleChangeCurve}
+          modelName={generator.name}
+          isMockModel={generator.isMock}
+          semantic={generator === routerModel ? semantic : null}
+          onToggleSemantic={(on) => void enableSemantic(on)}
+          lastRoute={lastMotion?.motion.route ?? null}
+          outputFiles={lastMotion ? motionOutputFiles(lastMotion.motion) : []}
+          onDownloadFile={(f) => downloadText(f.name, f.text)}
+        />
+      </aside>
+
+      {/* Avatar, with the player at the bottom center */}
+      <main className="relative flex-1 min-h-0">
+        <AvatarViewport
+          animation={animation}
+          playTrigger={playTrigger}
+          avatar={avatar}
+          avatarError={avatarError}
+          onAvatarError={setAvatarError}
+          bottomInset={20}
+          showSkeleton={showSkeleton}
+          onAvatarInfo={setAvatarInfo}
+        />
+      </main>
     </div>
   );
 }

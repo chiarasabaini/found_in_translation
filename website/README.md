@@ -4,11 +4,10 @@ A one-page translator from text to Italian Sign Language (LIS). You type a phras
 
 ## The page
 
-- **Title** at the top, the **avatar** in the middle, a **chat-style input** at the bottom.
-- **Input:** pick the languages (from English or Italian, to LIS), type the phrase, press Enter (Shift+Enter for a new line).
-- **Result:** the signs (glosses, e.g. `CIAO · COME-STAI`) appear above the input, with the words that could not be signed. A compact player (play, replay, timeline, speed) sits above them.
-- **Camera** (right side): Front, Hands, Face, and the skeleton view. Narrow screens get a wider framing so the arms stay in view.
-- **Settings** (gear, top right): avatar choice and local VRM/GLB upload, avatar details (bones, face rig), transition curve between signs, motion model name, download of the last model output.
+- **Left column:** the title, the translator (languages from English or Italian to LIS, the text, **Translate**), the result, and the **Settings** at the bottom. Enter translates, Shift+Enter adds a new line.
+- **Result:** the signs (glosses, e.g. `CIAO · MI-CHIAMO`) and the words that could not be signed.
+- **Avatar** on the right, with a compact player (play, replay, timeline, speed) at the bottom center. Drag to orbit the camera; narrow screens get a wider framing so the arms stay in view. On phones the avatar is on top and the column below.
+- **Settings:** avatar choice and local VRM/GLB upload, avatar details (bones, face rig), **Show skeleton**, transition curve between signs, motion model (with the optional semantic match), how the last phrase was routed, download of the last model output.
 
 ## Languages
 
@@ -69,7 +68,7 @@ text ─► LisRouter (src/router/lisRouter.ts)
 - **No spaCy in the browser:** function-word lists, a table of irregular verbs, the Snowball Italian stemmer (`src/router/italianStemmer.ts`, checked against the reference implementation) and the POS of the dataset words.
 - **Face markers** from the router modifiers: raised brows for yes/no questions, furrowed brows for wh-questions, furrowed brows and a frown for negation.
 - **Other source languages** (English) go to Italian through the dictionary phrases first.
-- **Semantic match (optional):** the settings menu turns on a sentence encoder (`Xenova/multilingual-e5-small`, transformers.js loaded from the CDN, ~120 MB downloaded once and cached). Without it the whole-sentence step uses exact and character similarity, and paraphrases ("come va?" → "come stai") fall back to the words.
+- **Semantic match (optional):** the settings turn on a sentence encoder (`Xenova/multilingual-e5-small`, transformers.js loaded from the CDN, ~120 MB downloaded once and cached). Without it the whole-sentence step uses exact and character similarity, and paraphrases ("come va?" → "come stai") fall back to the words.
 - **Speed:** router query < 1 ms, index of a few kB, each clip ~80 kB fetched on demand. The Python router needs ~5.6 s to load (e5-base + spaCy) and ~17 ms per query, and a server.
 
 ### Export the dataset for the site
@@ -90,7 +89,7 @@ The build uses a relative base (`base: './'` in `vite.config.ts`), so `dist/` wo
 
 Order of the generators: a model server when `VITE_MOTION_MODEL_URL` is set, else the LIS router over `public/lis/`, else the mock. The typed phrase goes to a text-to-motion model. The model returns recording-format files (one clip per sign, or one recording of the whole phrase), and the site animates the avatar with the recording import and retargeting, joining the clips with smooth transitions. The user does not choose how the signs are produced.
 
-The real model does not exist yet. Until then, `src/generation/mockMotionModel.ts` plays its role in the browser: it splits the phrase into dictionary signs (`src/generation/signPlanner.ts`) and synthesizes one rest-to-rest clip per sign (CSV files at 30 Hz) from placeholder handshapes, the dictionary anchors and motion arcs, and arm IK, as the real model will. **The mock handshapes are not validated LIS signs.** The page shows the gloss sequence and the words it could not sign; the settings menu downloads the generated CSV files.
+The real model does not exist yet. Until then, `src/generation/mockMotionModel.ts` plays its role in the browser: it splits the phrase into dictionary signs (`src/generation/signPlanner.ts`) and synthesizes one rest-to-rest clip per sign (CSV files at 30 Hz) from placeholder handshapes, the dictionary anchors and motion arcs, and arm IK, as the real model will. **The mock handshapes are not validated LIS signs.** The page shows the gloss sequence and the words it could not sign; the settings download the generated CSV files.
 
 To use the real model, set `VITE_MOTION_MODEL_URL` at build time (see `.env.example`).
 
@@ -151,7 +150,7 @@ File contract (same as the "Recording format" table above):
 4. The transition time comes from the largest arm rotation (0.15–0.6 s), and it is long enough that no bone goes faster than 7 rad/s (arms) or 12 rad/s (fingers, head) at its peak.
 5. A hand that is idle in a sign between two signs that use it does not drop to rest: one long transition bridges it.
 
-Curves: **Quintic (minimum jerk)**, the default, is C2 and gives the bell-shaped speed profile of human reaching movements; **Cubic Hermite** is C1. Pick one in the settings menu to compare them on the same output, without a new model request.
+Curves: **Quintic (minimum jerk)**, the default, is C2 and gives the bell-shaped speed profile of human reaching movements; **Cubic Hermite** is C1. Pick one in the settings to compare them on the same output, without a new model request.
 
 Limit: the transitions are smooth but neutral. Real coarticulation (the handshape of B forming during A) needs a model trained on continuous phrases or a motion in-betweening network.
 
@@ -198,7 +197,7 @@ LIS_RECORDING_DIR=/path/to/test_1_20261114_162048 node --test src/recording/reco
 
 ## Avatars
 
-The **avatar** select in the settings menu picks the avatar:
+The **avatar** select in the settings picks the avatar:
 
 - **Woman (default)**: `assets/woman.glb` in the repository root (next to `website/`). The build copies it into `dist/assets/` with a content hash; the dev server serves it from the source folder (`server.fs.allow` in `vite.config.ts`). Any humanoid GLB/VRM works: the rig is analyzed when it loads. If the file cannot be loaded, the viewport shows the procedural avatar and a notice.
 - **Procedural**: the avatar generated in code, always available.
@@ -209,7 +208,7 @@ The built-in choice is remembered per browser (localStorage). To add a built-in 
 ## Using an external VRM / GLB avatar
 
 1. Export a free humanoid avatar from **VRoid Studio / VRoid Hub** (`.vrm`) or **Ready Player Me** (`.glb` with ARKit blendshapes).
-2. In the web app, open the settings menu (gear, top right) and click **Load VRM / GLB** to test the local file with `@pixiv/three-vrm`.
+2. In the web app, open **Settings** in the left column and click **Load VRM / GLB** to test the local file with `@pixiv/three-vrm`.
 3. If the morph target names differ from the ARKit standard, update `retargeting.face_blendshape_map` in `config/sensors_and_retargeting.yaml` and re-run `python3 -m pipeline.run_pipeline` (for recordings: `FACE_BLENDSHAPE_MAP` in `src/recording/recordingRetarget.ts`).
 
 ### Face rig: three levels, chosen per channel
@@ -223,10 +222,10 @@ The avatar loader drives the 9 face channels (`mouthOpen`, `mouthSmile`, `mouthF
    - detects the landmarks from its geometry: nose tip, lip line (the shallow hollow between the lips, at about 1/3 from subnasale to chin), eye sockets (profile concavity), brows, face width;
    - defines a displacement field per channel fitted to that face (jaw rotation around a hinge near the ears, lid closure, brow raise, mouth corners, lips, cheeks);
    - builds a **mixed rig**:
-     - **Facial bones**, children of `Head`, placed on the landmarks: `AutoFace_Jaw`, `AutoFace_EyelidUpper_L/R`, `AutoFace_EyelidLower_L/R`, `AutoFace_Brow_L/R`, `AutoFace_MouthCorner_L/R`, `AutoFace_Cheek_L/R`. The face vertices get skin weights toward them, fitted so that the bone motion reproduces each field. The bones carry the main motion and appear in the **Skeleton** view.
+     - **Facial bones**, children of `Head`, placed on the landmarks: `AutoFace_Jaw`, `AutoFace_EyelidUpper_L/R`, `AutoFace_EyelidLower_L/R`, `AutoFace_Brow_L/R`, `AutoFace_MouthCorner_L/R`, `AutoFace_Cheek_L/R`. The face vertices get skin weights toward them, fitted so that the bone motion reproduces each field. The bones carry the main motion and appear with **Show skeleton**.
      - **Residual blendshapes**: whatever the bones cannot reproduce, with the canonical channel names. Bones plus blendshapes give exactly the target shape.
 
-   Other head meshes (eyebrows, lashes, beard) follow only near the skin; hair strands do not. Each new avatar gets its own fit when it is loaded. The settings menu shows `auto face rig (N channels)` in the avatar details.
+   Other head meshes (eyebrows, lashes, beard) follow only near the skin; hair strands do not. Each new avatar gets its own fit when it is loaded. The settings show `auto face rig (N channels)` in the avatar details.
 
 The default (procedural) avatar uses the same mixed-rig engine, with its hand-made deformations as the target: 10 facial bones (no lower lids) plus residual blendshapes. Left/right follow the avatar's side, as in ARKit: `eyeBlinkLeft` closes the avatar's left eye (+X).
 

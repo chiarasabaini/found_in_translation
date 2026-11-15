@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Download, Settings2, Upload, X } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { ChevronDown, Download, Settings2, Upload } from 'lucide-react';
 import { BUILTIN_AVATARS, DEFAULT_AVATAR_ID, type AvatarChoice } from '../avatars/avatarCatalog';
 import type { TransitionCurve } from '../generation/stitchClips';
 import type { RecordingFileInput } from '../recording/rokokoRecording';
@@ -8,7 +8,7 @@ import type { SemanticState } from '../router/lisRouterModel';
 
 const FILE_OPTION = '__file__';
 
-interface SettingsMenuProps {
+interface SettingsPanelProps {
   avatar: AvatarChoice;
   onChangeAvatar: (next: AvatarChoice) => void;
   /** Format, bones and face rig of the current avatar. */
@@ -25,13 +25,15 @@ interface SettingsMenuProps {
   onToggleSemantic: (on: boolean) => void;
   /** How the router handled the last phrase. */
   lastRoute: GeneratedMotion['route'] | null;
+  showSkeleton: boolean;
+  onToggleSkeleton: (on: boolean) => void;
 }
 
 const fieldSelect =
   'w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-blue-600 focus:outline-none cursor-pointer';
 
-/** Gear button with avatar, transition and model-output settings. */
-export const SettingsMenu: React.FC<SettingsMenuProps> = ({
+/** Collapsible settings of the left column: avatar, skeleton, transitions, motion model. */
+export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   avatar,
   onChangeAvatar,
   avatarInfo,
@@ -44,28 +46,13 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   semantic,
   onToggleSemantic,
   lastRoute,
+  showSkeleton,
+  onToggleSkeleton,
 }) => {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Last local file, kept in the list so the user can switch back to it.
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
 
   const handleSelectAvatar = (value: string) => {
     if (value === FILE_OPTION) {
@@ -76,24 +63,23 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   };
 
   return (
-    <div ref={rootRef} className="relative">
+    <div className="border-t border-slate-200">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-label="Settings"
-        title="Settings"
-        className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/90 hover:bg-white border border-slate-200 text-slate-700 shadow-sm cursor-pointer"
+        aria-controls="settings-panel"
+        className="w-full flex items-center justify-between gap-2 px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
       >
-        {open ? <X className="w-4 h-4" aria-hidden="true" /> : <Settings2 className="w-4 h-4" aria-hidden="true" />}
+        <span className="inline-flex items-center gap-2">
+          <Settings2 className="w-4 h-4" aria-hidden="true" />
+          Settings
+        </span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
 
       {open && (
-        <div
-          role="dialog"
-          aria-label="Settings"
-          className="absolute right-0 mt-2 w-[min(320px,calc(100vw-2rem))] bg-white border border-slate-200 rounded-2xl shadow-xl p-4 space-y-4 text-sm"
-        >
+        <div id="settings-panel" className="px-5 pb-5 space-y-4 text-sm">
           <section className="space-y-2">
             <label htmlFor="avatar-select" className="block text-xs font-medium text-slate-500">
               Avatar
@@ -135,6 +121,15 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               Load VRM / GLB
             </button>
             {avatarInfo && <p className="text-xs text-slate-500 leading-relaxed">{avatarInfo}</p>}
+            <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                className="accent-blue-600"
+                checked={showSkeleton}
+                onChange={(e) => onToggleSkeleton(e.target.checked)}
+              />
+              Show skeleton
+            </label>
           </section>
 
           <section className="space-y-2">

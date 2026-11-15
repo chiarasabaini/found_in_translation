@@ -6,7 +6,6 @@ import {
   Play,
   Pause,
   RotateCcw,
-  Bone,
   AlertTriangle,
 } from 'lucide-react';
 import type { SignAnimationPayload } from '../types/lis';
@@ -21,8 +20,6 @@ import {
 } from '../avatars/avatarCatalog';
 import { buildSignAnimationClip, type AvatarRigTarget } from '../utils/clipBuilder';
 
-type CameraPreset = 'front' | 'hands' | 'face';
-
 const PROCEDURAL_AVATAR_INFO = 'Procedural · 54 body bones + 10 facial bones + blendshapes';
 
 interface AvatarViewportProps {
@@ -33,28 +30,22 @@ interface AvatarViewportProps {
   onAvatarError: (err: string | null) => void;
   externalTimeSec?: number | null;
   onTimeUpdate?: (timeSec: number) => void;
-  /** Distance of the player from the bottom edge (px), to sit above the composer. */
+  /** Distance of the player from the bottom edge (px). */
   bottomInset?: number;
+  /** Shows the bone skeleton over the avatar. */
+  showSkeleton?: boolean;
   /** Reports the avatar description (format, bones, face rig) when it changes. */
   onAvatarInfo?: (info: string) => void;
 }
 
-const CAMERA_PRESETS: Record<
-  CameraPreset,
-  { pos: [number, number, number]; target: [number, number, number]; label: string }
-> = {
-  // Framed for the free area between the title and the composer: hips to raised hands.
-  front: { pos: [0, 1.42, 2.05], target: [0, 1.38, 0.05], label: 'Front' },
-  hands: { pos: [0, 1.28, 1.05], target: [0, 1.24, 0.22], label: 'Hands' },
-  face: { pos: [0, 1.66, 0.72], target: [0, 1.62, 0.05], label: 'Face' },
-};
+/** Front view, framed from the hips to raised hands, below the title. */
+const FRONT_VIEW = { pos: [0, 1.42, 2.05] as const, target: [0, 1.38, 0.05] as const };
 
-/** Camera pose of a preset, pulled back on narrow screens so the arms stay in view. */
-function presetPose(preset: CameraPreset, aspect: number): { pos: THREE.Vector3; target: THREE.Vector3 } {
-  const cfg = CAMERA_PRESETS[preset];
-  const target = new THREE.Vector3(...cfg.target);
-  const pos = new THREE.Vector3(...cfg.pos);
-  const minAspect = preset === 'face' ? 0.6 : 0.8;
+/** Front camera pose, pulled back on narrow screens so the arms stay in view. */
+function frontPose(aspect: number): { pos: THREE.Vector3; target: THREE.Vector3 } {
+  const target = new THREE.Vector3(...FRONT_VIEW.target);
+  const pos = new THREE.Vector3(...FRONT_VIEW.pos);
+  const minAspect = 0.8;
   if (aspect < minAspect) pos.sub(target).multiplyScalar(Math.min(2.2, minAspect / aspect)).add(target);
   return { pos, target };
 }
@@ -83,14 +74,14 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
   externalTimeSec = null,
   onTimeUpdate,
   bottomInset = 16,
+  showSkeleton = false,
   onAvatarInfo,
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState<0.5 | 1 | 1.5>(1);
-  const [skeletonDebug, setSkeletonDebug] = useState(false);
-  const [cameraPreset, setCameraPreset] = useState<CameraPreset>('front');
+  const skeletonDebug = showSkeleton;
   const [currentTime, setCurrentTime] = useState(0);
   const [webglUnavailable, setWebglUnavailable] = useState(false);
   const [avatarInfo, setAvatarInfo] = useState<string>(PROCEDURAL_AVATAR_INFO);
@@ -125,7 +116,6 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
     proceduralInstance: ProceduralAvatarHandle | null;
     requestRender: () => void;
     startPlaybackLoop: () => void;
-    setCameraGoal: (preset: CameraPreset) => void;
     applyClip: (anim: SignAnimationPayload, autoPlay: boolean) => void;
     scrubTo: (t: number) => void;
   } | null>(null);
@@ -170,7 +160,7 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
     pmrem.dispose();
 
     const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 30);
-    const initialPose = presetPose('front', width / height);
+    const initialPose = frontPose(width / height);
     camera.position.copy(initialPose.pos);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -367,12 +357,12 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
     };
 
     controls.addEventListener('change', requestRender);
-    // The camera follows the preset (also on resize) until the user orbits it.
-    let activePreset: CameraPreset | null = 'front';
+    // The camera keeps the front framing (also on resize) until the user orbits it.
+    let followFront = true;
     controls.addEventListener('start', () => {
       cameraGoalPos = null;
       cameraGoalTarget = null;
-      activePreset = null;
+      followFront = false;
     });
 
     const handleResize = () => {
@@ -382,8 +372,8 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
-      if (activePreset) {
-        const pose = presetPose(activePreset, camera.aspect);
+      if (followFront) {
+        const pose = frontPose(camera.aspect);
         camera.position.copy(pose.pos);
         controls.target.copy(pose.target);
         cameraGoalPos = null;
@@ -409,13 +399,6 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
       proceduralInstance: procedural,
       requestRender,
       startPlaybackLoop,
-      setCameraGoal: (preset) => {
-        activePreset = preset;
-        const pose = presetPose(preset, camera.aspect);
-        cameraGoalPos = pose.pos;
-        cameraGoalTarget = pose.target;
-        if (!isPlayingRef.current) requestRender();
-      },
       applyClip: (anim, autoPlay) => {
         const api = sceneApiRef.current;
         if (!api || !api.mixer) return;
@@ -645,11 +628,6 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
 
   const duration = animation?.duration ?? 1.5;
 
-  const pillButton = (active: boolean) =>
-    `px-2.5 py-1 text-xs font-medium rounded-full transition-colors cursor-pointer ${
-      active ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-    }`;
-
   return (
     <div
       className="relative w-full h-full bg-[#E8EEF5] overflow-hidden select-none"
@@ -663,7 +641,7 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
       <div ref={mountRef} className="w-full h-full" />
 
       {/* Avatar status: loading, errors, notices */}
-      <div className="absolute top-16 left-4 right-4 sm:right-auto z-10 flex flex-col gap-2 items-start pointer-events-none">
+      <div className="absolute top-4 left-4 right-4 sm:right-auto z-10 flex flex-col gap-2 items-start pointer-events-none">
         {avatarLoading && (
           <div role="status" className="bg-white/95 border border-slate-200 rounded-full px-3 py-1 text-xs text-slate-600 shadow-sm">
             Loading avatar…
@@ -682,39 +660,7 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
         ) : null}
       </div>
 
-      {/* Camera views and skeleton, right side */}
-      <div
-        className="absolute right-3 top-16 z-10 flex flex-col items-stretch gap-1 bg-white/90 border border-slate-200 rounded-2xl p-1 shadow-sm"
-        role="group"
-        aria-label="Camera view"
-      >
-        {(Object.keys(CAMERA_PRESETS) as CameraPreset[]).map((preset) => (
-          <button
-            key={preset}
-            type="button"
-            onClick={() => {
-              setCameraPreset(preset);
-              sceneApiRef.current?.setCameraGoal(preset);
-            }}
-            aria-pressed={cameraPreset === preset}
-            className={pillButton(cameraPreset === preset)}
-          >
-            {CAMERA_PRESETS[preset].label}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => setSkeletonDebug((v) => !v)}
-          aria-pressed={skeletonDebug}
-          aria-label="Show skeleton"
-          title="Show skeleton"
-          className={`${pillButton(skeletonDebug)} inline-flex justify-center`}
-        >
-          <Bone className="w-3.5 h-3.5" aria-hidden="true" />
-        </button>
-      </div>
-
-      {/* Compact player, above the composer */}
+      {/* Compact player, bottom center */}
       {animation && (
         <div
           className="absolute left-1/2 -translate-x-1/2 z-10 w-[min(560px,calc(100%-2rem))] bg-white/95 border border-slate-200 rounded-full pl-1.5 pr-3 py-1 shadow-sm flex items-center gap-2"
