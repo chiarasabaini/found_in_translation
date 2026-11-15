@@ -13,18 +13,26 @@ import {
 } from 'lucide-react';
 import type { SignAnimationPayload } from '../types/lis';
 import { createProceduralLisAvatar, type ProceduralAvatarHandle } from '../three/proceduralAvatar';
-// The VRM/GLB loader (GLTFLoader + three-vrm) loads on demand, when the user picks a file.
+// The VRM/GLB loader (GLTFLoader + three-vrm) loads on demand, when a GLB/VRM avatar is shown.
 import type { LoadedVrmAvatar } from '../three/vrmAdapter';
+import {
+  AvatarNotFoundError,
+  fetchAvatarBuffer,
+  findBuiltinAvatar,
+  type AvatarChoice,
+} from '../avatars/avatarCatalog';
 import { buildSignAnimationClip, type AvatarRigTarget } from '../utils/clipBuilder';
 
 type CameraPreset = 'front' | 'hands' | 'face';
 
+const PROCEDURAL_AVATAR_INFO = 'Procedural · 54 body bones + 10 facial bones + blendshapes';
+
 interface AvatarViewportProps {
   animation: SignAnimationPayload | null;
   playTrigger: number;
-  customAvatarFile: File | null;
-  customAvatarError: string | null;
-  onCustomAvatarError: (err: string | null) => void;
+  avatar: AvatarChoice;
+  avatarError: string | null;
+  onAvatarError: (err: string | null) => void;
   externalTimeSec?: number | null;
   onTimeUpdate?: (timeSec: number) => void;
 }
@@ -56,9 +64,9 @@ function detectSoftwareGl(): boolean {
 export const AvatarViewport: React.FC<AvatarViewportProps> = ({
   animation,
   playTrigger,
-  customAvatarFile,
-  customAvatarError,
-  onCustomAvatarError,
+  avatar,
+  avatarError,
+  onAvatarError,
   externalTimeSec = null,
   onTimeUpdate,
 }) => {
@@ -71,7 +79,9 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [webglUnavailable, setWebglUnavailable] = useState(false);
-  const [customAvatarInfo, setCustomAvatarInfo] = useState<string | null>(null);
+  const [avatarInfo, setAvatarInfo] = useState<string>(PROCEDURAL_AVATAR_INFO);
+  const [avatarNotice, setAvatarNotice] = useState<string | null>(null);
+  const [avatarLoading, setAvatarLoading] = useState(false);
 
   // Refs bridging React state into the single-mount Three.js loop without re-creating renderer
   const isPlayingRef = useRef(isPlaying);
@@ -80,6 +90,8 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
   isPlayingRef.current = isPlaying;
   speedRef.current = speed;
   onTimeUpdateRef.current = onTimeUpdate;
+  const animationRef = useRef(animation);
+  animationRef.current = animation;
 
   const sceneApiRef = useRef<{
     scene: THREE.Scene;
@@ -447,78 +459,117 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
     };
   }, []);
 
-  // Load or reset custom VRM/GLB file when user uploads one
+  // Show the chosen avatar: built-in GLB/VRM, local file or procedural.
+  // A missing built-in file falls back to the procedural avatar.
   useEffect(() => {
     const api = sceneApiRef.current;
     if (!api) return;
     let cancelled = false;
+    const abort = new AbortController();
 
-    const swapAvatar = async () => {
-      if (customAvatarFile) {
-        try {
-          onCustomAvatarError(null);
-          const { loadVrmOrGlbFromFile } = await import('../three/vrmAdapter');
-          const loaded = await loadVrmOrGlbFromFile(customAvatarFile);
-          if (cancelled) {
-            loaded.dispose();
-            return;
-          }
-          api.avatarGroup.clear();
-          api.vrmInstance?.dispose();
-          api.vrmInstance = loaded;
-          api.avatarGroup.add(loaded.root);
-          api.rigTarget = loaded.rigTarget;
-          api.skeletonHelper = loaded.skeletonHelper;
-          api.skeletonHelper.visible = skeletonDebug;
-          api.mixer = new THREE.AnimationMixer(loaded.root);
-          api.activeAction = null;
-          const autoChannels = loaded.autoFaceRig?.channels.length ?? 0;
-          const authoredMorphs = loaded.rigTarget.availableMorphs.size - autoChannels;
-          const faceParts: string[] = [];
-          if (authoredMorphs > 0) faceParts.push(`${authoredMorphs} morphs`);
-          if (loaded.hasFacialBoneRig) faceParts.push('face bone rig');
-          if (autoChannels > 0) faceParts.push(`auto face rig (${autoChannels} channels)`);
-          const faceLabel = faceParts.length ? faceParts.join(' + ') : 'no face rig';
-          const boneLabel =
-            loaded.drivenBonesCount > loaded.matchedBonesCount
-              ? `${loaded.matchedBonesCount} (${loaded.drivenBonesCount} driven) bones`
-              : `${loaded.matchedBonesCount} bones`;
-          setCustomAvatarInfo(`${loaded.detectedFormat} · ${boneLabel} · ${faceLabel}`);
-          if (animation) api.applyClip(animation, false);
-          else api.requestRender();
-        } catch (err) {
-          if (!cancelled) {
-            setCustomAvatarInfo(null);
-            onCustomAvatarError(
-              err instanceof Error ? err.message : 'Invalid VRM/GLB file',
-            );
-          }
-        }
-      } else if (api.vrmInstance) {
-        api.vrmInstance.dispose();
-        api.vrmInstance = null;
-        setCustomAvatarInfo(null);
-        api.avatarGroup.clear();
-        if (api.proceduralInstance) {
-          api.avatarGroup.add(api.proceduralInstance.root);
-          api.rigTarget = api.proceduralInstance.rigTarget;
-          api.skeletonHelper = api.proceduralInstance.skeletonHelper;
-          api.skeletonHelper.visible = skeletonDebug;
-          api.mixer = new THREE.AnimationMixer(api.proceduralInstance.root);
-          api.activeAction = null;
-          if (animation) api.applyClip(animation, false);
-          else api.requestRender();
-        }
-      } else {
-        setCustomAvatarInfo(null);
-      }
+    const attach = (
+      root: THREE.Object3D,
+      rigTarget: AvatarRigTarget,
+      skeletonHelper: THREE.SkeletonHelper,
+    ) => {
+      const helperVisible = api.skeletonHelper.visible;
+      api.avatarGroup.clear();
+      api.avatarGroup.add(root);
+      api.avatarGroup.visible = true;
+      api.rigTarget = rigTarget;
+      api.skeletonHelper = skeletonHelper;
+      api.skeletonHelper.visible = helperVisible;
+      api.mixer = new THREE.AnimationMixer(root);
+      api.activeAction = null;
+      const anim = animationRef.current;
+      if (anim) api.applyClip(anim, false);
+      else api.requestRender();
     };
 
-    void swapAvatar();
+    const showProcedural = () => {
+      setAvatarInfo(PROCEDURAL_AVATAR_INFO);
+      const procedural = api.proceduralInstance;
+      if (!procedural) return;
+      const alreadyShown = !api.vrmInstance && procedural.root.parent === api.avatarGroup;
+      api.vrmInstance?.dispose();
+      api.vrmInstance = null;
+      if (alreadyShown) {
+        api.avatarGroup.visible = true;
+        api.requestRender();
+        return;
+      }
+      attach(procedural.root, procedural.rigTarget, procedural.skeletonHelper);
+    };
+
+    const showLoaded = (loaded: LoadedVrmAvatar, name: string) => {
+      api.vrmInstance?.dispose();
+      api.vrmInstance = loaded;
+      attach(loaded.root, loaded.rigTarget, loaded.skeletonHelper);
+      const autoChannels = loaded.autoFaceRig?.channels.length ?? 0;
+      const authoredMorphs = loaded.rigTarget.availableMorphs.size - autoChannels;
+      const faceParts: string[] = [];
+      if (authoredMorphs > 0) faceParts.push(`${authoredMorphs} morphs`);
+      if (loaded.hasFacialBoneRig) faceParts.push('face bone rig');
+      if (autoChannels > 0) faceParts.push(`auto face rig (${autoChannels} channels)`);
+      const faceLabel = faceParts.length ? faceParts.join(' + ') : 'no face rig';
+      const boneLabel =
+        loaded.drivenBonesCount > loaded.matchedBonesCount
+          ? `${loaded.matchedBonesCount} (${loaded.drivenBonesCount} driven) bones`
+          : `${loaded.matchedBonesCount} bones`;
+      setAvatarInfo(`${name} · ${loaded.detectedFormat} · ${boneLabel} · ${faceLabel}`);
+    };
+
+    const load = async () => {
+      onAvatarError(null);
+      setAvatarNotice(null);
+      let buffer: ArrayBuffer;
+      let name: string;
+      if (avatar.kind === 'file') {
+        name = avatar.file.name;
+        setAvatarLoading(true);
+        buffer = await avatar.file.arrayBuffer();
+      } else {
+        const entry = findBuiltinAvatar(avatar.id);
+        name = entry.label;
+        if (!entry.url) {
+          setAvatarLoading(false);
+          showProcedural();
+          return;
+        }
+        // Hide the current avatar while the new one downloads (no procedural flash at startup).
+        setAvatarLoading(true);
+        api.avatarGroup.visible = false;
+        api.requestRender();
+        buffer = await fetchAvatarBuffer(entry.url, abort.signal);
+      }
+      const { loadVrmOrGlbFromArrayBuffer } = await import('../three/vrmAdapter');
+      const loaded = await loadVrmOrGlbFromArrayBuffer(buffer);
+      if (cancelled) {
+        loaded.dispose();
+        return;
+      }
+      showLoaded(loaded, name);
+    };
+
+    load()
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        showProcedural();
+        if (err instanceof AvatarNotFoundError) {
+          setAvatarNotice(`${err.url} not found. Showing the procedural avatar.`);
+        } else {
+          onAvatarError(err instanceof Error ? err.message : 'Invalid VRM/GLB file');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAvatarLoading(false);
+      });
+
     return () => {
       cancelled = true;
+      abort.abort();
     };
-  }, [customAvatarFile]);
+  }, [avatar]);
 
   // Apply animation when class or playTrigger changes
   useEffect(() => {
@@ -581,9 +632,7 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
       <div className="absolute top-4 left-4 z-10 pointer-events-none">
         <div className="bg-white/95 border border-slate-200 rounded-lg px-3.5 py-2 shadow-sm">
           <div className="text-xs text-slate-500">
-            {customAvatarFile
-              ? `${customAvatarFile.name}${customAvatarInfo ? ` · ${customAvatarInfo}` : ''}`
-              : 'Humanoid avatar · 54 body bones + 10 facial bones + blendshapes'}
+            {avatarLoading ? 'Loading avatar…' : avatarInfo}
           </div>
           <div className="text-sm font-display font-semibold text-slate-900">
             {animation ? animation.phrase : 'Waiting for a phrase'}
@@ -591,12 +640,17 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
         </div>
       </div>
 
-      {customAvatarError && (
-        <div className="absolute top-4 right-4 z-10 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2 text-xs text-red-800 flex items-center gap-2 max-w-xs">
+      {avatarError ? (
+        <div role="alert" className="absolute top-4 right-4 z-10 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2 text-xs text-red-800 flex items-center gap-2 max-w-xs">
           <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" aria-hidden="true" />
-          <span>{customAvatarError}</span>
+          <span>{avatarError}</span>
         </div>
-      )}
+      ) : avatarNotice ? (
+        <div role="status" className="absolute top-4 right-4 z-10 bg-amber-50 border border-amber-200 rounded-lg px-3.5 py-2 text-xs text-amber-900 flex items-center gap-2 max-w-xs">
+          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" aria-hidden="true" />
+          <span>{avatarNotice}</span>
+        </div>
+      ) : null}
 
       {webglUnavailable && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-100 p-6">

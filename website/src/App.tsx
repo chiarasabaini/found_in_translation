@@ -12,6 +12,7 @@ import { PhraseInputPanel } from './components/PhraseInputPanel';
 import { AvatarViewport } from './components/AvatarViewport';
 import { deleteRecordedClip, downloadText, loadRecordedClips, saveRecordedClip } from './recording/clipStore';
 import { getSignLanguage, localizeClass, useLanguageSettings } from './i18n/languages';
+import { useAvatarChoice } from './avatars/avatarCatalog';
 import type { GenerationResult, InterpreterMode } from './components/PhraseInputPanel';
 import { configuredModelUrl, HttpMotionModel, type MotionGenerator } from './generation/motionModel';
 import { MockMotionModel } from './generation/mockMotionModel';
@@ -54,8 +55,8 @@ export default function App() {
   const [generation, setGeneration] = useState<GenerationResult | null>(null);
   const generationAbortRef = useRef<AbortController | null>(null);
 
-  const [customAvatarFile, setCustomAvatarFile] = useState<File | null>(null);
-  const [customAvatarError, setCustomAvatarError] = useState<string | null>(null);
+  const [avatar, setAvatar] = useAvatarChoice();
+  const [avatarError, setAvatarError] = useState<string | null>(null);
 
   const animCacheRef = useRef<Map<string, SignAnimationPayload>>(new Map());
 
@@ -287,11 +288,10 @@ export default function App() {
         onChangeView={setViewMode}
         languages={languages}
         onChangeLanguages={setLanguages}
-        customAvatarName={customAvatarFile?.name ?? null}
-        onUploadAvatarFile={(file) => setCustomAvatarFile(file)}
-        onResetAvatar={() => {
-          setCustomAvatarFile(null);
-          setCustomAvatarError(null);
+        avatar={avatar}
+        onChangeAvatar={(next) => {
+          setAvatarError(null);
+          setAvatar(next);
         }}
       />
 
@@ -328,9 +328,9 @@ export default function App() {
             <AvatarViewport
               animation={displayedAnimation}
               playTrigger={playTrigger}
-              customAvatarFile={customAvatarFile}
-              customAvatarError={customAvatarError}
-              onCustomAvatarError={setCustomAvatarError}
+              avatar={avatar}
+              avatarError={avatarError}
+              onAvatarError={setAvatarError}
             />
           </section>
         </main>
@@ -345,9 +345,9 @@ export default function App() {
             activeAnimation={displayedAnimation}
             qaSummary={qaSummary}
             onSelectClass={(cls) => void loadClassAnimation(cls, false)}
-            customAvatarFile={customAvatarFile}
-            customAvatarError={customAvatarError}
-            onCustomAvatarError={setCustomAvatarError}
+            avatar={avatar}
+            avatarError={avatarError}
+            onAvatarError={setAvatarError}
           />
         </main>
       )}
@@ -371,9 +371,9 @@ export default function App() {
             onAssignClip={handleAssignRecordedClip}
             onRemoveClip={handleRemoveRecordedClip}
             onPlayInInterpreter={playInInterpreter}
-            customAvatarFile={customAvatarFile}
-            customAvatarError={customAvatarError}
-            onCustomAvatarError={setCustomAvatarError}
+            avatar={avatar}
+            avatarError={avatarError}
+            onAvatarError={setAvatarError}
           />
         </main>
       )}

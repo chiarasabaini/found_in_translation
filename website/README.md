@@ -124,6 +124,16 @@ Test the recording import on a real recording:
 LIS_RECORDING_DIR=/path/to/test_1_20261114_162048 node --test src/recording/recording.test.ts
 ```
 
+## Avatars
+
+The **avatar** select in the top bar picks the avatar shown in every viewport:
+
+- **Woman (default)**: `public/assets/woman.glb`, served at `/assets/woman.glb`. Put the file there; any humanoid GLB/VRM works (the rig is analyzed when it loads). If the file is missing, the viewport shows the procedural avatar and a notice.
+- **Procedural**: the avatar generated in code, always available.
+- **Load VRM / GLB**: a local file. It stays in the list for the session.
+
+The built-in choice is remembered per browser (localStorage). To add a built-in avatar, put the file in `public/assets/` and add an entry to `BUILTIN_AVATARS` in `src/avatars/avatarCatalog.ts`; `DEFAULT_AVATAR_ID` sets the default.
+
 ## Using an external VRM / GLB avatar
 
 1. Export a free humanoid avatar from **VRoid Studio / VRoid Hub** (`.vrm`) or **Ready Player Me** (`.glb` with ARKit blendshapes).
