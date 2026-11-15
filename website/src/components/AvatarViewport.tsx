@@ -19,6 +19,10 @@ import {
   type AvatarChoice,
 } from '../avatars/avatarCatalog';
 import { buildSignAnimationClip, type AvatarRigTarget } from '../utils/clipBuilder';
+import { restPosePayload } from '../recording/recordingRetarget';
+
+/** Idle pose: arms along the sides (GLB models often load in T-pose). */
+const REST_PAYLOAD = restPosePayload();
 
 const PROCEDURAL_AVATAR_INFO = 'Procedural · 54 body bones + 10 facial bones + blendshapes';
 
@@ -492,9 +496,8 @@ export const AvatarViewport: React.FC<AvatarViewportProps> = ({
       api.skeletonHelper.visible = helperVisible;
       api.mixer = new THREE.AnimationMixer(root);
       api.activeAction = null;
-      const anim = animationRef.current;
-      if (anim) api.applyClip(anim, false);
-      else api.requestRender();
+      // No phrase yet: hold the rest pose instead of the bind pose (T-pose).
+      api.applyClip(animationRef.current ?? REST_PAYLOAD, false);
     };
 
     const showProcedural = () => {

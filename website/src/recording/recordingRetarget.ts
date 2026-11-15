@@ -156,6 +156,28 @@ const REST_POSE: Record<string, Quat> = {
   leftLowerArm: qFromEulerXYZ(-0.22, 0, 0),
 };
 
+/**
+ * Two-frame animation holding the rest pose (arms along the sides), for an idle avatar.
+ * Through the same retargeting as the clips, so T-pose and A-pose models end up alike.
+ */
+export function restPosePayload(): SignAnimationPayload {
+  const boneTracks: Record<string, number[]> = {};
+  for (const [name, q] of Object.entries(REST_POSE)) boneTracks[name] = [...q, ...q];
+  return {
+    classId: 'rest',
+    phrase: '',
+    category: 'Rest',
+    description: 'Rest pose',
+    prototypeClipId: 'rest',
+    fps: 10,
+    duration: 0.1,
+    times: [0, 0.1],
+    boneTracks,
+    morphTracks: {},
+    qaComparison: { group1VsGroup2Right: [], group1VsGroup2Left: [], frames: [] },
+  };
+}
+
 /** Procedural rig dimensions, used only for the QA wrist trace. */
 const SHOULDER_POS: Record<HandSide, Vec3> = { right: [-0.195, 1.42, 0], left: [0.195, 1.42, 0] };
 const UPPER_ARM_LEN = 0.28;
