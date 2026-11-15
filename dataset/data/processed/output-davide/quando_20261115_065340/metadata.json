@@ -1,0 +1,43 @@
+{
+  "sample_id": "quando_20261115_065340",
+  "prompt_index": 7,
+  "sentence": "quando",
+  "num_frames": 35,
+  "duration_ms": 1133,
+  "avg_fps": 30.89,
+  "created_at": "2026-11-15T07:26:32",
+  "postprocessed": true,
+  "postprocess_stats": {
+    "raw_frames": 149,
+    "raw_duration_ms": 3171,
+    "raw_fps": 46.99,
+    "trimmed_start_frames": 41,
+    "trimmed_end_frames": 54,
+    "interpolated_face_frames": 0,
+    "interpolated_body_frames": 0,
+    "interpolated_left_frames": 0,
+    "interpolated_right_frames": 0,
+    "target_fps": 30.0
+  },
+  "mannequin": {
+    "actor_height_m": 1.75,
+    "shoulder_height_m": 1.35,
+    "pelvis_height_m": 0.88,
+    "shoulder_half_width_m": 0.19,
+    "hip_half_width_m": 0.11,
+    "elbow_x_m": 0.24,
+    "elbow_y_m": 1.09,
+    "neck_to_chin_y_m": 0.115,
+    "neck_to_chin_z_m": 0.04,
+    "face_height_m": 0.25,
+    "face_width_m": 0.195,
+    "face_depth_m": 0.16,
+    "hand_rig_scale": 0.82
+  },
+  "files": {
+    "left_hand": "left_hand.csv",
+    "right_hand": "right_hand.csv",
+    "face": "face.csv",
+    "body": "body.csv"
+  }
+}
