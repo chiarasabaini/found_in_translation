@@ -1,11 +1,14 @@
 /**
  * Avatar catalog and avatar choice.
  *
- * Built-in avatars are GLB/VRM files served from `public/assets/` (URL `/assets/<file>`), plus
- * the procedural avatar generated in code. The user can also load a local VRM/GLB file.
+ * Built-in avatars are GLB/VRM files in the repository `assets/` folder (next to `website/`),
+ * plus the procedural avatar generated in code. Vite resolves `new URL(..., import.meta.url)`:
+ * the build copies the file into `dist/assets/` with a content hash, the dev server serves it
+ * from its source path (see `server.fs.allow` in vite.config.ts). The user can also load a local VRM/GLB file.
  * The built-in choice is remembered per browser; a local file is kept for the session only.
  *
- * To add a built-in avatar: put the file in `public/assets/` and add an entry to BUILTIN_AVATARS.
+ * To add a built-in avatar: put the file in the repository `assets/` folder and add an entry to
+ * BUILTIN_AVATARS with a `new URL('../../../assets/<file>', import.meta.url)` literal.
  */
 
 import { useEffect, useState } from 'react';
@@ -20,7 +23,7 @@ export interface BuiltinAvatar {
 export const PROCEDURAL_AVATAR_ID = 'procedural';
 
 export const BUILTIN_AVATARS: BuiltinAvatar[] = [
-  { id: 'woman', label: 'Woman', url: '/assets/woman.glb' },
+  { id: 'woman', label: 'Woman', url: new URL('../../../assets/woman.glb', import.meta.url).href },
   { id: PROCEDURAL_AVATAR_ID, label: 'Procedural' },
 ];
 

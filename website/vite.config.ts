@@ -29,6 +29,8 @@ export default defineConfig(() => {
       },
     },
     server: {
+      // Built-in avatars live in the repository assets/ folder, outside the website root.
+      fs: { allow: [import.meta.dirname, path.resolve(import.meta.dirname, '../assets')] },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

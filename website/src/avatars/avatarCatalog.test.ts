@@ -14,7 +14,7 @@ const bytes = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer;
 
 test('the default avatar is woman.glb and the procedural avatar is always available', () => {
   assert.equal(DEFAULT_AVATAR_ID, 'woman');
-  assert.equal(findBuiltinAvatar(DEFAULT_AVATAR_ID).url, '/assets/woman.glb');
+  assert.match(findBuiltinAvatar(DEFAULT_AVATAR_ID).url ?? '', /\/assets\/woman\.glb$/);
   assert.equal(findBuiltinAvatar(PROCEDURAL_AVATAR_ID).url, undefined);
   assert.equal(findBuiltinAvatar('unknown').id, DEFAULT_AVATAR_ID);
   assert.equal(new Set(BUILTIN_AVATARS.map((a) => a.id)).size, BUILTIN_AVATARS.length);

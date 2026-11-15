@@ -128,11 +128,11 @@ LIS_RECORDING_DIR=/path/to/test_1_20261114_162048 node --test src/recording/reco
 
 The **avatar** select in the top bar picks the avatar shown in every viewport:
 
-- **Woman (default)**: `public/assets/woman.glb`, served at `/assets/woman.glb`. Put the file there; any humanoid GLB/VRM works (the rig is analyzed when it loads). If the file is missing, the viewport shows the procedural avatar and a notice.
+- **Woman (default)**: `assets/woman.glb` in the repository root (next to `website/`). The build copies it into `dist/assets/` with a content hash; the dev server serves it from the source folder (`server.fs.allow` in `vite.config.ts`). Any humanoid GLB/VRM works: the rig is analyzed when it loads. If the file cannot be loaded, the viewport shows the procedural avatar and a notice.
 - **Procedural**: the avatar generated in code, always available.
 - **Load VRM / GLB**: a local file. It stays in the list for the session.
 
-The built-in choice is remembered per browser (localStorage). To add a built-in avatar, put the file in `public/assets/` and add an entry to `BUILTIN_AVATARS` in `src/avatars/avatarCatalog.ts`; `DEFAULT_AVATAR_ID` sets the default.
+The built-in choice is remembered per browser (localStorage). To add a built-in avatar, put the file in the repository `assets/` folder and add an entry to `BUILTIN_AVATARS` in `src/avatars/avatarCatalog.ts` (with a `new URL('../../../assets/<file>', import.meta.url)` literal); `DEFAULT_AVATAR_ID` sets the default.
 
 ## Using an external VRM / GLB avatar
 
