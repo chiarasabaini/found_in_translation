@@ -25,6 +25,7 @@ import {
   retargetRecording,
 } from '../recording/recordingRetarget';
 import { downloadJson } from '../recording/clipStore';
+import type { AvatarChoice } from '../avatars/avatarCatalog';
 
 interface RecordingStudioViewProps {
   classes: DictionaryClass[];
@@ -32,9 +33,9 @@ interface RecordingStudioViewProps {
   onAssignClip: (cls: DictionaryClass, payload: SignAnimationPayload) => Promise<boolean>;
   onRemoveClip: (classId: string) => void;
   onPlayInInterpreter: (cls: DictionaryClass) => void;
-  customAvatarFile: File | null;
-  customAvatarError: string | null;
-  onCustomAvatarError: (err: string | null) => void;
+  avatar: AvatarChoice;
+  avatarError: string | null;
+  onAvatarError: (err: string | null) => void;
 }
 
 type TuneOptions = typeof DEFAULT_RETARGET_OPTIONS;
@@ -140,9 +141,9 @@ export const RecordingStudioView: React.FC<RecordingStudioViewProps> = ({
   onAssignClip,
   onRemoveClip,
   onPlayInInterpreter,
-  customAvatarFile,
-  customAvatarError,
-  onCustomAvatarError,
+  avatar,
+  avatarError,
+  onAvatarError,
 }) => {
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const filesInputRef = useRef<HTMLInputElement | null>(null);
@@ -751,9 +752,9 @@ export const RecordingStudioView: React.FC<RecordingStudioViewProps> = ({
         <AvatarViewport
           animation={preview}
           playTrigger={playTrigger}
-          customAvatarFile={customAvatarFile}
-          customAvatarError={customAvatarError}
-          onCustomAvatarError={onCustomAvatarError}
+          avatar={avatar}
+          avatarError={avatarError}
+          onAvatarError={onAvatarError}
         />
       </section>
     </div>

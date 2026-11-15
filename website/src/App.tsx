@@ -12,16 +12,16 @@ import { PhraseInputPanel } from './components/PhraseInputPanel';
 import { AvatarViewport } from './components/AvatarViewport';
 import { deleteRecordedClip, downloadText, loadRecordedClips, saveRecordedClip } from './recording/clipStore';
 import { getSignLanguage, localizeClass, useLanguageSettings } from './i18n/languages';
-import type { GenerationResult, InterpreterMode } from './components/PhraseInputPanel';
-import { configuredModelUrl, HttpMotionModel, type MotionGenerator } from './generation/motionModel';
+import { useAvatarChoice } from './avatars/avatarCatalog';
+import type { DictionarySequence, GenerationResult, InterpreterMode } from './components/PhraseInputPanel';
+import { configuredModelUrl, HttpMotionModel, type GeneratedMotion, type MotionGenerator } from './generation/motionModel';
+import { motionToAnimation } from './generation/motionToAnimation';
+import { stitchClips, type TransitionCurve } from './generation/stitchClips';
+import { glossOf, planSigns, type PlannedSign } from './generation/signPlanner';
 import { MockMotionModel } from './generation/mockMotionModel';
-import { parseRokokoRecording } from './recording/rokokoRecording';
-import { DEFAULT_RETARGET_OPTIONS, retargetRecording } from './recording/recordingRetarget';
 
 // Secondary views load on first use, so the interpreter starts faster.
 const QaComparisonView = lazy(() => import('./components/QaComparisonView').then((m) => ({ default: m.QaComparisonView })));
-const DictionaryView = lazy(() => import('./components/DictionaryView').then((m) => ({ default: m.DictionaryView })));
-const ArchitectureView = lazy(() => import('./components/ArchitectureView').then((m) => ({ default: m.ArchitectureView })));
 const RecordingStudioView = lazy(() =>
   import('./components/RecordingStudioView').then((m) => ({ default: m.RecordingStudioView })),
 );
@@ -50,12 +50,21 @@ export default function App() {
   const [playTrigger, setPlayTrigger] = useState(0);
 
   const [interpreterMode, setInterpreterMode] = useState<InterpreterMode>('model');
+  const interpreterModeRef = useRef(interpreterMode);
+  interpreterModeRef.current = interpreterMode;
   const [generating, setGenerating] = useState(false);
   const [generation, setGeneration] = useState<GenerationResult | null>(null);
+  const [transitionCurve, setTransitionCurve] = useState<TransitionCurve>('quintic');
+  const transitionCurveRef = useRef(transitionCurve);
+  transitionCurveRef.current = transitionCurve;
+  const lastMotionRef = useRef<{ text: string; motion: GeneratedMotion } | null>(null);
+  // Dictionary mode: a phrase with several dictionary signs plays their clips joined.
+  const [dictSequence, setDictSequence] = useState<DictionarySequence | null>(null);
+  const lastSequenceRef = useRef<{ text: string; payloads: SignAnimationPayload[]; signs: DictionarySequence['signs']; unmatched: string[] } | null>(null);
   const generationAbortRef = useRef<AbortController | null>(null);
 
-  const [customAvatarFile, setCustomAvatarFile] = useState<File | null>(null);
-  const [customAvatarError, setCustomAvatarError] = useState<string | null>(null);
+  const [avatar, setAvatar] = useAvatarChoice();
+  const [avatarError, setAvatarError] = useState<string | null>(null);
 
   const animCacheRef = useRef<Map<string, SignAnimationPayload>>(new Map());
 
@@ -75,27 +84,36 @@ export default function App() {
     return out;
   }, [allRecordedClips, signLanguage.code]);
 
+  /** Stored clip of a class: the assigned glove recording if any, otherwise the cached pipeline clip. */
+  const cachedClassPayload = useCallback((cls: DictionaryClass): SignAnimationPayload | null => {
+    const key = clipKey(signCodeRef.current, cls.id);
+    return allRecordedClipsRef.current[key] ?? animCacheRef.current.get(key) ?? null;
+  }, []);
+
+  const getClassPayload = useCallback(async (cls: DictionaryClass): Promise<SignAnimationPayload> => {
+    const cached = cachedClassPayload(cls);
+    if (cached) return cached;
+    const res = await fetch(cls.animationUrl);
+    if (!res.ok) throw new Error(`Cannot load ${cls.animationUrl}`);
+    const payload = (await res.json()) as SignAnimationPayload;
+    animCacheRef.current.set(clipKey(signCodeRef.current, cls.id), payload);
+    return payload;
+  }, [cachedClassPayload]);
+
   const loadClassAnimation = useCallback(async (cls: DictionaryClass, autoPlay: boolean) => {
     setActiveClassId(cls.id);
-    const recorded = allRecordedClipsRef.current[clipKey(signCodeRef.current, cls.id)];
-    if (recorded) {
-      setActiveAnimation(recorded);
-      if (autoPlay) setPlayTrigger((n) => n + 1);
-      return;
-    }
-    const cacheKey = clipKey(signCodeRef.current, cls.id);
-    const cached = animCacheRef.current.get(cacheKey);
-    if (cached) {
-      setActiveAnimation(cached);
+    setDictSequence(null);
+    lastSequenceRef.current = null;
+    lastMotionRef.current = null;
+    const fromCache = cachedClassPayload(cls);
+    if (fromCache) {
+      setActiveAnimation(fromCache);
       if (autoPlay) setPlayTrigger((n) => n + 1);
       return;
     }
     setLoadingAnim(true);
     try {
-      const res = await fetch(cls.animationUrl);
-      if (!res.ok) throw new Error(`Cannot load ${cls.animationUrl}`);
-      const payload = (await res.json()) as SignAnimationPayload;
-      animCacheRef.current.set(cacheKey, payload);
+      const payload = await getClassPayload(cls);
       setActiveAnimation(payload);
       if (autoPlay) setPlayTrigger((n) => n + 1);
     } catch (err) {
@@ -103,7 +121,7 @@ export default function App() {
     } finally {
       setLoadingAnim(false);
     }
-  }, []);
+  }, [cachedClassPayload, getClassPayload]);
 
   // Load the dictionary of the selected sign language (and the stored recordings once).
   useEffect(() => {
@@ -128,7 +146,8 @@ export default function App() {
         setAllRecordedClips(stored);
         setDictionary(dictData);
         setQaSummary(qaData);
-        if (dictData.classes.length > 0) {
+        // Dictionary mode starts on the first sign; model mode waits for a phrase.
+        if (interpreterModeRef.current === 'dictionary' && dictData.classes.length > 0) {
           void loadClassAnimation(dictData.classes[0], false);
         }
       } catch (err) {
@@ -148,6 +167,9 @@ export default function App() {
     setQuery('');
     setMatchResult(null);
     setGeneration(null);
+    lastMotionRef.current = null;
+    setDictSequence(null);
+    lastSequenceRef.current = null;
   }, [languages.sourceLanguage, languages.signLanguage]);
 
   // Dictionary text in the source language; durations of recorded clips where present.
@@ -183,6 +205,16 @@ export default function App() {
     return url ? new HttpMotionModel(url) : new MockMotionModel(classes);
   }, [classes]);
 
+  /** Shows the animation built from a model output (stitching per-sign clips if needed). */
+  const showMotion = useCallback((text: string, motion: GeneratedMotion, curve: TransitionCurve, autoPlay: boolean) => {
+    const anim = motionToAnimation(motion, text, curve);
+    setGeneration({ text, motion: anim ? { ...motion, segments: anim.segments } : motion });
+    if (!anim) return;
+    setActiveClassId(null);
+    setActiveAnimation(anim.payload);
+    if (autoPlay) setPlayTrigger((n) => n + 1);
+  }, []);
+
   /** Text -> motion model -> recording-format CSV -> same import and retargeting as real recordings. */
   const handleGenerate = async (text: string) => {
     if (!text.trim()) return;
@@ -197,24 +229,10 @@ export default function App() {
         ctrl.signal,
       );
       if (ctrl.signal.aborted) return;
-      setGeneration({ text, motion });
-      if (!motion.files.length) return;
-      const rec = parseRokokoRecording(motion.files, 'generated');
-      const error = rec.diagnostics.find((d) => d.level === 'error');
-      if (error) throw new Error(`Model output not valid: ${error.message}`);
-      const { payload } = retargetRecording(rec, {
-        ...DEFAULT_RETARGET_OPTIONS,
-        startSec: 0,
-        endSec: rec.durationSec,
-        classId: 'generated',
-        phrase: text,
-        category: 'Generated',
-        description: motion.segments.map((s) => s.gloss).join(' · '),
-      });
-      payload.prototypeClipId = motion.model;
-      setActiveClassId(null);
-      setActiveAnimation(payload);
-      setPlayTrigger((n) => n + 1);
+      lastMotionRef.current = { text, motion };
+      lastSequenceRef.current = null;
+      setDictSequence(null);
+      showMotion(text, motion, transitionCurveRef.current, true);
     } catch (err) {
       if ((err as Error)?.name === 'AbortError') return;
       setLoadError(err instanceof Error ? err.message : 'Motion generation failed');
@@ -222,6 +240,66 @@ export default function App() {
       if (generationAbortRef.current === ctrl) setGenerating(false);
     }
   };
+
+  /** Joins the stored clips of several dictionary signs. */
+  const showSequence = useCallback(
+    (seq: NonNullable<typeof lastSequenceRef.current>, curve: TransitionCurve, autoPlay: boolean) => {
+      const r = stitchClips(seq.payloads.map((payload) => ({ payload })), { curve });
+      r.payload.classId = 'sequence';
+      r.payload.phrase = seq.text;
+      r.payload.category = 'Dictionary sequence';
+      r.payload.description = seq.signs.map((x) => x.gloss).join(' · ');
+      setDictSequence({
+        signs: seq.signs.map((x, i) => ({
+          ...x,
+          startSec: Math.round(r.segments[i].startSec * 100) / 100,
+          endSec: Math.round(r.segments[i].endSec * 100) / 100,
+        })),
+        unmatched: seq.unmatched,
+      });
+      setActiveClassId(null);
+      setActiveAnimation(r.payload);
+      if (autoPlay) setPlayTrigger((n) => n + 1);
+    },
+    [],
+  );
+
+  const playDictionarySequence = async (text: string, signs: PlannedSign[], unmatched: string[]) => {
+    setLoadingAnim(true);
+    try {
+      const payloads = await Promise.all(signs.map((x) => getClassPayload(x.cls)));
+      const seq = {
+        text,
+        payloads,
+        signs: signs.map((x) => ({ text: x.text, phrase: x.cls.phrase, gloss: glossOf(x.cls), classId: x.cls.id, startSec: 0, endSec: 0 })),
+        unmatched,
+      };
+      lastSequenceRef.current = seq;
+      lastMotionRef.current = null;
+      showSequence(seq, transitionCurveRef.current, true);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Cannot load the sign clips');
+    } finally {
+      setLoadingAnim(false);
+    }
+  };
+
+  // A new transition curve re-joins the last model output (no new request to the model).
+  useEffect(() => {
+    const last = lastMotionRef.current;
+    if (!last?.motion.clips?.length) return;
+    try {
+      showMotion(last.text, last.motion, transitionCurve, true);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Cannot join the model clips');
+    }
+  }, [transitionCurve, showMotion]);
+
+  // ...and the last dictionary sequence.
+  useEffect(() => {
+    const last = lastSequenceRef.current;
+    if (last) showSequence(last, transitionCurve, true);
+  }, [transitionCurve, showSequence]);
 
   const handleSubmitQuery = (textOverride?: string) => {
     if (!dictionary) return;
@@ -231,8 +309,17 @@ export default function App() {
       void handleGenerate(text);
       return;
     }
+    // Several dictionary phrases in the text: join their clips.
+    const plan = planSigns(text, classes);
+    if (plan.signs.length >= 2) {
+      setMatchResult(null);
+      void playDictionarySequence(text, plan.signs, plan.unmatched);
+      return;
+    }
     const res = runMatch(text);
     setMatchResult(res);
+    setDictSequence(null);
+    lastSequenceRef.current = null;
     if (res.matched && res.best) {
       const targetCls = classes.find((c) => c.id === res.best?.classId);
       if (targetCls) void loadClassAnimation(targetCls, true);
@@ -287,11 +374,10 @@ export default function App() {
         onChangeView={setViewMode}
         languages={languages}
         onChangeLanguages={setLanguages}
-        customAvatarName={customAvatarFile?.name ?? null}
-        onUploadAvatarFile={(file) => setCustomAvatarFile(file)}
-        onResetAvatar={() => {
-          setCustomAvatarFile(null);
-          setCustomAvatarError(null);
+        avatar={avatar}
+        onChangeAvatar={(next) => {
+          setAvatarError(null);
+          setAvatar(next);
         }}
       />
 
@@ -308,6 +394,7 @@ export default function App() {
             onChangeQuery={setQuery}
             onSubmitQuery={handleSubmitQuery}
             matchResult={matchResult}
+            dictSequence={dictSequence}
             classes={classes}
             activeClassId={activeClassId}
             activeAnimation={displayedAnimation}
@@ -323,14 +410,16 @@ export default function App() {
             generating={generating}
             generation={generation}
             onDownloadFile={(name, text) => downloadText(name, text)}
+            transitionCurve={transitionCurve}
+            onChangeTransitionCurve={setTransitionCurve}
           />
           <section aria-label="3D avatar viewport" className="flex-1 min-h-[420px] lg:h-full relative">
             <AvatarViewport
               animation={displayedAnimation}
               playTrigger={playTrigger}
-              customAvatarFile={customAvatarFile}
-              customAvatarError={customAvatarError}
-              onCustomAvatarError={setCustomAvatarError}
+              avatar={avatar}
+              avatarError={avatarError}
+              onAvatarError={setAvatarError}
             />
           </section>
         </main>
@@ -345,20 +434,9 @@ export default function App() {
             activeAnimation={displayedAnimation}
             qaSummary={qaSummary}
             onSelectClass={(cls) => void loadClassAnimation(cls, false)}
-            customAvatarFile={customAvatarFile}
-            customAvatarError={customAvatarError}
-            onCustomAvatarError={setCustomAvatarError}
-          />
-        </main>
-      )}
-
-      {viewMode === 'dictionary' && (
-        <main className="flex-1 flex overflow-hidden">
-          <DictionaryView
-            classes={classes}
-            recordedIds={recordedIds}
-            signLanguage={signLanguage.code}
-            onPlayInInterpreter={playInInterpreter}
+            avatar={avatar}
+            avatarError={avatarError}
+            onAvatarError={setAvatarError}
           />
         </main>
       )}
@@ -371,18 +449,13 @@ export default function App() {
             onAssignClip={handleAssignRecordedClip}
             onRemoveClip={handleRemoveRecordedClip}
             onPlayInInterpreter={playInInterpreter}
-            customAvatarFile={customAvatarFile}
-            customAvatarError={customAvatarError}
-            onCustomAvatarError={setCustomAvatarError}
+            avatar={avatar}
+            avatarError={avatarError}
+            onAvatarError={setAvatarError}
           />
         </main>
       )}
 
-      {viewMode === 'architecture' && (
-        <main className="flex-1 flex overflow-hidden">
-          <ArchitectureView />
-        </main>
-      )}
       </Suspense>
     </div>
   );

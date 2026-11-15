@@ -11,7 +11,9 @@
  */
 
 import type { AnchorConfig, DictionaryClass } from '../types/lis';
-import { matchPhrase, normalizePhrase } from '../utils/matcher';
+
+export { glossOf, planSigns, type PlannedSign };
+import { glossOf, planSigns, type PlannedSign } from './signPlanner';
 import { ROKOKO_HAND_JOINTS, type RecordingFileInput, type RokokoJoint } from '../recording/rokokoRecording';
 import {
   qFromAxisAngle,
@@ -28,7 +30,7 @@ import {
   type Quat,
   type Vec3,
 } from '../recording/math3d';
-import type { GeneratedMotion, GlossSegment, MotionGenerator, MotionRequest } from './motionModel';
+import type { GeneratedClip, GeneratedMotion, GlossSegment, MotionGenerator, MotionRequest } from './motionModel';
 
 type Side = 'right' | 'left';
 
@@ -361,52 +363,6 @@ function faceLandmarks(head: Quat): Array<[number, Vec3]> {
 
 const f5 = (v: number) => (Math.abs(v) < 5e-6 ? '0' : v.toFixed(5));
 
-export interface PlannedSign {
-  text: string;
-  cls: DictionaryClass;
-}
-
-/**
- * Splits a phrase into dictionary signs: longest word n-grams first, strict similarity.
- * Returns the signs in order and the words that match nothing.
- */
-export function planSigns(text: string, classes: DictionaryClass[]): { signs: PlannedSign[]; unmatched: string[] } {
-  const whole = matchPhrase(text, classes, 0.9, 1);
-  if (whole.matched && whole.best) {
-    const cls = classes.find((c) => c.id === whole.best?.classId);
-    if (cls) return { signs: [{ text: text.trim(), cls }], unmatched: [] };
-  }
-  const tokens = normalizePhrase(text).split(' ').filter(Boolean);
-  const signs: PlannedSign[] = [];
-  const unmatched: string[] = [];
-  let i = 0;
-  while (i < tokens.length) {
-    let found = false;
-    for (let len = Math.min(6, tokens.length - i); len >= 1; len--) {
-      const chunk = tokens.slice(i, i + len).join(' ');
-      const res = matchPhrase(chunk, classes, len === 1 ? 0.88 : 0.8, 1);
-      if (res.matched && res.best) {
-        const cls = classes.find((c) => c.id === res.best?.classId);
-        if (cls) {
-          signs.push({ text: chunk, cls });
-          i += len;
-          found = true;
-          break;
-        }
-      }
-    }
-    if (!found) {
-      unmatched.push(tokens[i]);
-      i++;
-    }
-  }
-  return { signs, unmatched };
-}
-
-export function glossOf(cls: DictionaryClass): string {
-  return cls.id.toUpperCase().replace(/_/g, '-');
-}
-
 /** Synthesizes recording-format CSV files for a sequence of signs. */
 export function synthesizeRecording(signs: PlannedSign[]): { files: RecordingFileInput[]; segments: GlossSegment[] } {
   // Timeline: rest, sign, transition, sign, ..., rest.
@@ -549,14 +505,37 @@ export function synthesizeRecording(signs: PlannedSign[]): { files: RecordingFil
   };
 }
 
+/** One rest-to-rest clip per sign, as the real model returns them. */
+export function synthesizeSignClips(signs: PlannedSign[]): GeneratedClip[] {
+  return signs.map((s) => {
+    const { files, segments } = synthesizeRecording([s]);
+    return {
+      text: s.text,
+      gloss: glossOf(s.cls),
+      classId: s.cls.id,
+      files,
+      strokeStartSec: segments[0].startSec,
+      strokeEndSec: segments[0].endSec,
+    };
+  });
+}
+
+export type MockOutput = 'clips' | 'continuous';
+
 export class MockMotionModel implements MotionGenerator {
   readonly name = 'Mock motion model v0 (in-browser placeholder)';
   readonly isMock = true;
   private readonly classes: DictionaryClass[];
+  private readonly output: MockOutput;
 
-  /** `classes` must carry the text of the request's source language. */
-  constructor(classes: DictionaryClass[]) {
+  /**
+   * `classes` must carry the text of the request's source language.
+   * `output`: 'clips' (default) returns one clip per sign, like the real model;
+   * 'continuous' returns the whole phrase as one recording.
+   */
+  constructor(classes: DictionaryClass[], output: MockOutput = 'clips') {
     this.classes = classes;
+    this.output = output;
   }
 
   async generate(request: MotionRequest, signal?: AbortSignal): Promise<GeneratedMotion> {
@@ -566,6 +545,17 @@ export class MockMotionModel implements MotionGenerator {
     const { signs, unmatched } = planSigns(request.text, this.classes);
     if (!signs.length) {
       return { files: [], segments: [], unmatched, model: this.name };
+    }
+    if (this.output === 'clips') {
+      const clips = synthesizeSignClips(signs);
+      const segments: GlossSegment[] = clips.map((c) => ({
+        text: c.text,
+        gloss: c.gloss,
+        classId: c.classId,
+        startSec: c.strokeStartSec ?? 0,
+        endSec: c.strokeEndSec ?? 0,
+      }));
+      return { files: [], clips, segments, unmatched, model: this.name };
     }
     const { files, segments } = synthesizeRecording(signs);
     return { files, segments, unmatched, model: this.name };

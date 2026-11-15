@@ -870,6 +870,7 @@ export function retargetRecording(rec: RokokoRecording, opts: RecordingRetargetO
   };
   const qaFrames: QaFrame[] = [];
   const fadeFrames = Math.max(0, Math.round(opts.fadeSec * fps));
+  const prevTwistAngle: Record<HandSide, number | null> = { right: null, left: null };
 
   for (let k = 0; k < nFrames; k++) {
     let fade = 1;
@@ -917,8 +918,18 @@ export function retargetRecording(rec: RokokoRecording, opts: RecordingRetargetO
       let handLocal = qNormalize(qMul(qConj(lowerWorld), raw.hand[side][k]));
 
       // Move 70% of the forearm twist (pronation) from the wrist into the forearm.
+      // Unwrap the twist angle over time: near 180° the shortest-path twist flips between
+      // +180° and -180°, and 70% of it would make the forearm jump by ~110° in one frame.
       const twist = twistAround(handLocal, [0, 1, 0]);
-      const share = qSlerp(IDENTITY, twist, 0.7);
+      let twistAngle = 2 * Math.atan2(twist[1], twist[3]);
+      twistAngle = Math.atan2(Math.sin(twistAngle), Math.cos(twistAngle));
+      const prevTwist = prevTwistAngle[side];
+      if (prevTwist !== null) {
+        while (twistAngle - prevTwist > Math.PI) twistAngle -= 2 * Math.PI;
+        while (twistAngle - prevTwist < -Math.PI) twistAngle += 2 * Math.PI;
+      }
+      prevTwistAngle[side] = twistAngle;
+      const share = qFromAxisAngle([0, 1, 0], 0.7 * twistAngle);
       lowerLocal = qNormalize(qMul(lowerLocal, share));
       lowerWorld = qMul(upperWorld, lowerLocal);
       handLocal = qNormalize(qMul(qConj(share), handLocal));

@@ -5,6 +5,7 @@ import type {
   SignAnimationPayload,
 } from '../types/lis';
 import { AvatarViewport } from './AvatarViewport';
+import type { AvatarChoice } from '../avatars/avatarCatalog';
 
 interface QaComparisonViewProps {
   classes: DictionaryClass[];
@@ -12,9 +13,9 @@ interface QaComparisonViewProps {
   activeAnimation: SignAnimationPayload | null;
   qaSummary: QaSummaryPayload | null;
   onSelectClass: (cls: DictionaryClass) => void;
-  customAvatarFile: File | null;
-  customAvatarError: string | null;
-  onCustomAvatarError: (err: string | null) => void;
+  avatar: AvatarChoice;
+  avatarError: string | null;
+  onAvatarError: (err: string | null) => void;
 }
 
 const FINGERS = ['thumb', 'index', 'middle', 'ring', 'little'] as const;
@@ -25,9 +26,9 @@ export const QaComparisonView: React.FC<QaComparisonViewProps> = ({
   activeAnimation,
   qaSummary,
   onSelectClass,
-  customAvatarFile,
-  customAvatarError,
-  onCustomAvatarError,
+  avatar,
+  avatarError,
+  onAvatarError,
 }) => {
   const [selectedFinger, setSelectedFinger] = useState<(typeof FINGERS)[number]>('index');
   const [selectedHand, setSelectedHand] = useState<'right' | 'left'>('right');
@@ -311,9 +312,9 @@ export const QaComparisonView: React.FC<QaComparisonViewProps> = ({
         <AvatarViewport
           animation={activeAnimation}
           playTrigger={0}
-          customAvatarFile={customAvatarFile}
-          customAvatarError={customAvatarError}
-          onCustomAvatarError={onCustomAvatarError}
+          avatar={avatar}
+          avatarError={avatarError}
+          onAvatarError={onAvatarError}
           externalTimeSec={scrubTime}
           onTimeUpdate={(t) => setScrubTime(t)}
         />
