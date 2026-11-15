@@ -18,6 +18,7 @@
  */
 
 import type { RecordingFileInput } from '../recording/rokokoRecording';
+import type { SignAnimationPayload } from '../types/lis';
 
 export interface MotionRequest {
   /** The phrase the user typed. */
@@ -46,8 +47,10 @@ export interface GeneratedClip {
   text: string;
   gloss: string;
   classId: string | null;
-  /** Recording-format CSV files of this sign. */
+  /** Recording-format CSV files of this sign (empty when `payload` is given). */
   files: RecordingFileInput[];
+  /** Already retargeted animation (exported dataset clips), instead of `files`. */
+  payload?: SignAnimationPayload;
   /** Stroke inside the clip (s): after leaving rest, before returning. Detected when missing. */
   strokeStartSec?: number;
   strokeEndSec?: number;
@@ -64,6 +67,10 @@ export interface GeneratedMotion {
   unmatched: string[];
   /** Model name and version, shown in the UI. */
   model: string;
+  /** Face channels to overlay on the whole phrase: "negation", "question_wh", "question_yn". */
+  modifiers?: string[];
+  /** How the router handled the phrase (router-based generators only). */
+  route?: { mode: string; matcher: string; score: number; matchedLabel: string | null; italian: string };
 }
 
 export interface MotionGenerator {

@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import type { DictionaryClass } from '../types/lis';
+import { BASE_URL } from '../utils/baseUrl';
 
 export interface SourceLanguage {
   code: string;
@@ -65,7 +66,7 @@ export const SIGN_LANGUAGES: SignLanguage[] = [
   {
     code: 'LIS',
     label: 'LIS – Italian Sign Language',
-    dictionaryUrl: '/data/dictionary.json',
+    dictionaryUrl: `${BASE_URL}data/dictionary.json`,
   },
 ];
 

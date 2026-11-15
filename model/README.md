@@ -83,4 +83,10 @@ python lis_router.py calibrate DATASET_ROOT calibration.json
 
 ## Use with the website
 
-The website accepts one clip per sign from its motion model endpoint (`clips` in the API, see [`website/README.md`](../website/README.md#motion-model-api)). A backend endpoint can call `LisRouter.translate`, read the CSV files of each folder in `paths`, and answer with one clip per folder; the site then removes the rest pose between clips and joins them with smooth transitions.
+The website runs a TypeScript port of this router in the browser ([`website/src/router/lisRouter.ts`](../website/src/router/lisRouter.ts)), so it works as a static site (GitHub Pages) with no Python server. The dataset is exported for it with `npm run export:lis` (see [`website/README.md`](../website/README.md#lis-router-static-in-the-browser)). Differences from this script:
+
+- no spaCy: function-word lists, irregular-verb table and the Snowball Italian stemmer stand in for POS tags and lemmas; subject and object come from the position before or after the verb;
+- the whole-sentence step uses exact and character similarity, plus the semantic match when the user turns the encoder on (`multilingual-e5-small` in the browser, `e5-base` here, so `tau` may need a new calibration);
+- in the word fallback, multi-word dataset sentences found inside the text are used as one clip ("ciao, mi chiamo Chiara" → `ciao` + `mi chiamo`; this script plays only `ciao`).
+
+This script stays the reference, and a server can still use it: the website accepts one clip per sign from `VITE_MOTION_MODEL_URL` (`clips` in the API, see [`website/README.md`](../website/README.md#motion-model-api)).

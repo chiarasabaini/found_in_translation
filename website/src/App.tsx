@@ -10,11 +10,25 @@ import { MockMotionModel } from './generation/mockMotionModel';
 import { motionOutputFiles, motionToAnimation } from './generation/motionToAnimation';
 import type { TransitionCurve } from './generation/stitchClips';
 import { downloadText } from './utils/download';
+import { BASE_URL } from './utils/baseUrl';
+import { LisRouterModel, type SemanticState } from './router/lisRouterModel';
+import { loadBrowserEncoder } from './router/browserEncoder';
+
+
+const SEMANTIC_KEY = 'found-in-translation.semantic';
+const readSemanticPref = () => {
+  try {
+    return localStorage.getItem(SEMANTIC_KEY) === 'on';
+  } catch {
+    return false;
+  }
+};
 
 /**
  * Found in Translation: one page, like a text translator.
- * The phrase goes to the motion model; its output (one clip per sign, or one recording) is
- * retargeted and joined, and the avatar signs it.
+ * The phrase goes to the motion generator: the LIS router over the exported dataset
+ * (public/lis/), a model server (VITE_MOTION_MODEL_URL), or the in-browser mock. Its output
+ * (one clip per sign, or one recording) is joined and the avatar signs it.
  */
 export default function App() {
   const [languages, setLanguages] = useLanguageSettings();
@@ -78,11 +92,61 @@ export default function App() {
     return (dictionary?.classes ?? []).map((c) => localizeClass(c, languages.sourceLanguage, base));
   }, [dictionary, languages.sourceLanguage]);
 
-  // The real model when VITE_MOTION_MODEL_URL is set, otherwise the in-browser mock.
+  // The exported dataset (public/lis/index.json), if the site has one.
+  const [routerModel, setRouterModel] = useState<LisRouterModel | null | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    void LisRouterModel.load(BASE_URL).then((m) => !cancelled && setRouterModel(m));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  useEffect(() => {
+    if (!routerModel || !dictionary) return;
+    const base = dictionary.metadata.base_language ?? 'it';
+    routerModel.setDictionary(
+      dictionary.classes.map((c) => localizeClass(c, base, base)),
+      (code) => dictionary.classes.map((c) => localizeClass(c, code, base)),
+    );
+  }, [routerModel, dictionary]);
+
+  // Model server when VITE_MOTION_MODEL_URL is set, else the LIS router, else the mock.
   const generator: MotionGenerator = useMemo(() => {
     const url = configuredModelUrl();
-    return url ? new HttpMotionModel(url) : new MockMotionModel(classes);
-  }, [classes]);
+    if (url) return new HttpMotionModel(url);
+    if (routerModel) return routerModel;
+    return new MockMotionModel(classes);
+  }, [classes, routerModel]);
+
+  // Optional semantic sentence match for the router (encoder downloaded once, ~120 MB).
+  const [semantic, setSemantic] = useState<SemanticState>({ status: 'off' });
+  const enableSemantic = useCallback(
+    async (on: boolean) => {
+      if (!routerModel) return;
+      try {
+        localStorage.setItem(SEMANTIC_KEY, on ? 'on' : 'off');
+      } catch {
+        // storage unavailable
+      }
+      if (!on) {
+        await routerModel.setEncoder(null);
+        setSemantic({ status: 'off' });
+        return;
+      }
+      setSemantic({ status: 'loading', fraction: null });
+      try {
+        const encoder = await loadBrowserEncoder((p) => setSemantic({ status: 'loading', fraction: p.fraction }));
+        await routerModel.setEncoder(encoder);
+        setSemantic({ status: 'on' });
+      } catch (err) {
+        setSemantic({ status: 'error', message: err instanceof Error ? err.message : 'Cannot load the encoder' });
+      }
+    },
+    [routerModel],
+  );
+  useEffect(() => {
+    if (routerModel && readSemanticPref()) void enableSemantic(true);
+  }, [routerModel, enableSemantic]);
 
   /** Model output -> animation (per-sign clips are joined with the chosen transition curve). */
   const show = useCallback((text: string, motion: GeneratedMotion, curve: TransitionCurve) => {
@@ -166,6 +230,9 @@ export default function App() {
           onChangeTransitionCurve={handleChangeCurve}
           modelName={generator.name}
           isMockModel={generator.isMock}
+          semantic={generator === routerModel ? semantic : null}
+          onToggleSemantic={(on) => void enableSemantic(on)}
+          lastRoute={lastMotion?.motion.route ?? null}
           outputFiles={lastMotion ? motionOutputFiles(lastMotion.motion) : []}
           onDownloadFile={(f) => downloadText(f.name, f.text)}
         />
@@ -179,7 +246,7 @@ export default function App() {
             value={query}
             onChange={setQuery}
             onSubmit={() => void handleTranslate()}
-            busy={busy || !dictionary}
+            busy={busy || !dictionary || routerModel === undefined}
             result={result}
             error={error ?? loadError}
           />

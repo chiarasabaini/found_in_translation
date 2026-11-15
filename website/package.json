@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/recording/recording.test.ts src/utils/matcher.test.ts src/utils/clipBuilder.test.ts src/i18n/languages.test.ts src/generation/mockMotionModel.test.ts src/three/autoFaceRig.test.ts src/avatars/avatarCatalog.test.ts src/generation/stitchClips.test.ts"
+    "export:lis": "tsx scripts/export-lis-dataset.ts",
+    "dataset:demo": "tsx scripts/make-demo-dataset.ts",
+    "test": "tsx --test src/recording/recording.test.ts src/utils/matcher.test.ts src/utils/clipBuilder.test.ts src/i18n/languages.test.ts src/generation/mockMotionModel.test.ts src/three/autoFaceRig.test.ts src/avatars/avatarCatalog.test.ts src/generation/stitchClips.test.ts src/router/lisRouter.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

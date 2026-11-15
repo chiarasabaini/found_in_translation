@@ -34,7 +34,7 @@ We record real LIS signers with **Rokoko Smartgloves** (fingers and hands) and c
 | Folder | Content |
 |---|---|
 | [`dataset/`](dataset/) | Capture of the LIS dataset (gloves + face and body cameras, synchronized), post-processing and 3D preview. Output: 4 CSV files per sample (`left_hand`, `right_hand`, `face`, `body`). |
-| [`model/`](model/) | Text → LIS animation routing (`lis_router.py`): semantic match of the whole phrase, otherwise spaCy lemmas reordered in LIS order and looked up word by word. |
+| [`model/`](model/) | Text → LIS animation routing (`lis_router.py`): semantic match of the whole phrase, otherwise spaCy lemmas reordered in LIS order and looked up word by word. The website runs a browser port of it. |
 | [`website/`](website/) | The web app: text input, motion retargeting, clip joining and 3D avatar playback. |
 | [`assets/`](assets/) | Avatars (`woman.glb`, the default one). |
 
@@ -52,7 +52,7 @@ We record real LIS signers with **Rokoko Smartgloves** (fingers and hands) and c
 
 # Website
 
-[`website/`](website/) is a one-page translator: a chat-style input with language pickers (English or Italian → LIS), and a 3D avatar that signs the phrase. The per-sign recordings are joined with smooth transitions (quintic minimum-jerk curves). A mock model stands in for the real one in the browser until the backend is connected.
+[`website/`](website/) is a one-page translator: a chat-style input with language pickers (English or Italian → LIS), and a 3D avatar that signs the phrase. It runs the router of [`model/`](model/) in the browser over the exported dataset (`website/public/lis/`, a demo export for now), joins the clips with smooth transitions (quintic minimum-jerk curves) and adds the LIS face markers for questions and negation. Everything is static, ready for GitHub Pages (`.github/workflows/pages.yml`).
 
 Run it with `cd website && npm install && npm run dev`, then open http://localhost:3000. Details are in [`website/README.md`](website/README.md).
 

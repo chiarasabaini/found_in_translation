@@ -1,0 +1,148 @@
+{
+ "version": 1,
+ "source": "demo",
+ "entries": [
+  {
+   "id": "0001_ciao_demo-4e9f2d",
+   "sentence": "ciao",
+   "norm": "ciao",
+   "kind": "word",
+   "clip": "clips/0001_ciao_demo-4e9f2d.json",
+   "duration": 2.3,
+   "strokeStartSec": 0.233,
+   "strokeEndSec": 2,
+   "lemma": "ciao",
+   "pos": "NOUN"
+  },
+  {
+   "id": "0002_grazie_demo-afc6b7",
+   "sentence": "grazie",
+   "norm": "grazie",
+   "kind": "word",
+   "clip": "clips/0002_grazie_demo-afc6b7.json",
+   "duration": 2.2,
+   "strokeStartSec": 0.3,
+   "strokeEndSec": 1.9,
+   "lemma": "grazie",
+   "pos": "NOUN"
+  },
+  {
+   "id": "0003_per_favore_demo-ff6cdf",
+   "sentence": "per favore",
+   "norm": "per favore",
+   "kind": "sentence",
+   "clip": "clips/0003_per_favore_demo-ff6cdf.json",
+   "duration": 2.5,
+   "strokeStartSec": 0.267,
+   "strokeEndSec": 2.2
+  },
+  {
+   "id": "0004_come_stai_demo-7d32df",
+   "sentence": "come stai",
+   "norm": "come stai",
+   "kind": "sentence",
+   "clip": "clips/0004_come_stai_demo-7d32df.json",
+   "duration": 2.6,
+   "strokeStartSec": 0.3,
+   "strokeEndSec": 2.267
+  },
+  {
+   "id": "0005_mi_chiamo_demo-764959",
+   "sentence": "mi chiamo",
+   "norm": "mi chiamo",
+   "kind": "sentence",
+   "clip": "clips/0005_mi_chiamo_demo-764959.json",
+   "duration": 2.4,
+   "strokeStartSec": 0.4,
+   "strokeEndSec": 1.967
+  },
+  {
+   "id": "0006_non_capisco_demo-90caea",
+   "sentence": "non capisco",
+   "norm": "non capisco",
+   "kind": "sentence",
+   "clip": "clips/0006_non_capisco_demo-90caea.json",
+   "duration": 2.5,
+   "strokeStartSec": 0.3,
+   "strokeEndSec": 2.2
+  },
+  {
+   "id": "0007_aiuto_demo-65c08c",
+   "sentence": "aiuto",
+   "norm": "aiuto",
+   "kind": "word",
+   "clip": "clips/0007_aiuto_demo-65c08c.json",
+   "duration": 2.3,
+   "strokeStartSec": 0.333,
+   "strokeEndSec": 1.9,
+   "lemma": "aiuto",
+   "pos": "NOUN"
+  },
+  {
+   "id": "0008_acqua_demo-a49de2",
+   "sentence": "acqua",
+   "norm": "acqua",
+   "kind": "word",
+   "clip": "clips/0008_acqua_demo-a49de2.json",
+   "duration": 2.2,
+   "strokeStartSec": 0.333,
+   "strokeEndSec": 1.8,
+   "lemma": "acqua",
+   "pos": "NOUN"
+  },
+  {
+   "id": "0009_bagno_demo-a4a95a",
+   "sentence": "bagno",
+   "norm": "bagno",
+   "kind": "word",
+   "clip": "clips/0009_bagno_demo-a4a95a.json",
+   "duration": 2.2,
+   "strokeStartSec": 0.267,
+   "strokeEndSec": 1.9,
+   "lemma": "bagno",
+   "pos": "NOUN"
+  },
+  {
+   "id": "0010_arrivederci_demo-6e55d0",
+   "sentence": "arrivederci",
+   "norm": "arrivederci",
+   "kind": "word",
+   "clip": "clips/0010_arrivederci_demo-6e55d0.json",
+   "duration": 2.4,
+   "strokeStartSec": 0.233,
+   "strokeEndSec": 2.1,
+   "lemma": "arrivederci",
+   "pos": "NOUN"
+  },
+  {
+   "id": "0011_ciao_come_stai_demo-6ceb1a",
+   "sentence": "ciao come stai",
+   "norm": "ciao come stai",
+   "kind": "sentence",
+   "clip": "clips/0011_ciao_come_stai_demo-6ceb1a.json",
+   "duration": 4.433,
+   "strokeStartSec": 0.233,
+   "strokeEndSec": 4.067
+  },
+  {
+   "id": "0012_grazie_arrivederci_demo-a531d0",
+   "sentence": "grazie arrivederci",
+   "norm": "grazie arrivederci",
+   "kind": "sentence",
+   "clip": "clips/0012_grazie_arrivederci_demo-a531d0.json",
+   "duration": 4.133,
+   "strokeStartSec": 0.3,
+   "strokeEndSec": 3.833
+  },
+  {
+   "id": "0013_aiuto_per_favore_demo-d475da",
+   "sentence": "aiuto per favore",
+   "norm": "aiuto per favore",
+   "kind": "sentence",
+   "clip": "clips/0013_aiuto_per_favore_demo-d475da.json",
+   "duration": 4.367,
+   "strokeStartSec": 0.333,
+   "strokeEndSec": 4.033
+  }
+ ]
+}

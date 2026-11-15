@@ -53,13 +53,16 @@ export function motionToAnimation(
     if (!motion.files.length) return null;
     const payload = retarget(parseModelFiles(motion.files, 'generated'), text, glossLine, null);
     payload.prototypeClipId = motion.model;
+    applyNonManualMarkers(payload, motion.modifiers ?? [], 0, payload.duration);
     return { payload, segments: motion.segments, transitions: [] };
   }
 
-  const recs = clips.map((c, i) => parseModelFiles(c.files, `${i + 1}-${c.gloss || 'sign'}`));
-  // One yaw for all clips, so a change of estimate between clips does not turn the hands.
-  const yaw = estimateGloveYawDeg(recs[0]);
-  const payloads = recs.map((rec) => retarget(rec, text, glossLine, yaw));
+  // Clips with files are retargeted here (one yaw for all, so a change of estimate between
+  // clips does not turn the hands); exported dataset clips come already retargeted.
+  const recs = clips.map((c, i) => (c.payload ? null : parseModelFiles(c.files, `${i + 1}-${c.gloss || 'sign'}`)));
+  const firstRec = recs.find((r) => r !== null);
+  const yaw = firstRec ? estimateGloveYawDeg(firstRec) : null;
+  const payloads = clips.map((c, i) => c.payload ?? retarget(recs[i]!, text, glossLine, yaw));
   const result = stitchClips(
     payloads.map((payload, i) => ({
       payload,
@@ -69,6 +72,16 @@ export function motionToAnimation(
     { ...stitch, curve },
   );
   result.payload.prototypeClipId = motion.model;
+  result.payload.phrase = text;
+  result.payload.description = glossLine;
+  if (result.segments.length) {
+    applyNonManualMarkers(
+      result.payload,
+      motion.modifiers ?? [],
+      result.segments[0].startSec,
+      result.segments[result.segments.length - 1].endSec,
+    );
+  }
   const segments: GlossSegment[] = result.segments.map((s) => ({
     text: clips[s.clip].text,
     gloss: clips[s.clip].gloss,
@@ -85,4 +98,32 @@ export function motionOutputFiles(motion: GeneratedMotion): RecordingFileInput[]
   return (motion.clips ?? []).flatMap((c, i) =>
     c.files.map((f) => ({ name: `${i + 1}-${c.gloss || 'sign'}-${f.name}`, text: f.text })),
   );
+}
+
+/**
+ * LIS non-manual markers over the signed part of the phrase (face channels of the avatar):
+ * yes/no question -> raised brows; wh-question -> furrowed brows; negation -> furrowed brows
+ * and a frown. Each channel takes the maximum of the clip value and the marker.
+ */
+export function applyNonManualMarkers(payload: SignAnimationPayload, modifiers: string[], startSec: number, endSec: number): void {
+  const targets: Record<string, number> = {};
+  const add = (name: string, v: number) => (targets[name] = Math.max(targets[name] ?? 0, v));
+  if (modifiers.includes('question_yn')) add('browUp', 0.6);
+  if (modifiers.includes('question_wh')) add('browDown', 0.5);
+  if (modifiers.includes('negation')) {
+    add('browDown', 0.35);
+    add('mouthFrown', 0.35);
+  }
+  if (!Object.keys(targets).length) return;
+  const ramp = 0.25;
+  const from = Math.max(0, startSec - 0.2);
+  const to = Math.min(payload.duration, endSec + 0.2);
+  const smooth = (x: number) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+  const env = (t: number) => Math.min(smooth((t - from) / ramp), smooth((to - t) / ramp));
+  for (const [name, value] of Object.entries(targets)) {
+    const track = (payload.morphTracks[name] ??= payload.times.map(() => 0));
+    payload.times.forEach((t, k) => {
+      track[k] = Math.round(Math.max(track[k] ?? 0, value * env(t)) * 1e4) / 1e4;
+    });
+  }
 }

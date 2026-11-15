@@ -53,9 +53,42 @@ All files share `timestamp_ms`.
 
 Retargeting method (`src/recording/recordingRetarget.ts`): bone directions from joint positions (3 phalanges per finger, back of the hand, forearm), upper arm from `body.csv`, head from the face landmarks relative to the median pose, ARKit blendshapes → avatar morphs. The axis signs of `body.csv` and the camera mirroring are detected automatically.
 
+## LIS router (static, in the browser)
+
+The page signs with the recordings of the LIS dataset, chosen by the router of [`model/`](../model/README.md), ported to the browser so the site stays static (GitHub Pages: no server, no Python):
+
+```
+text ─► LisRouter (src/router/lisRouter.ts)
+          1. whole sentence: exact match, else semantic (optional encoder) or lexical match,
+             with the negation / number guards and the margin of lis_router.py
+          2. else words in LIS order: time → subject → object → verb → negation → question word;
+             dataset phrases found inside the text are used as one clip ("mi chiamo")
+     ─► clips of public/lis/ (already retargeted) ─► stitchClips ─► face markers ─► avatar
+```
+
+- **No spaCy in the browser:** function-word lists, a table of irregular verbs, the Snowball Italian stemmer (`src/router/italianStemmer.ts`, checked against the reference implementation) and the POS of the dataset words.
+- **Face markers** from the router modifiers: raised brows for yes/no questions, furrowed brows for wh-questions, furrowed brows and a frown for negation.
+- **Other source languages** (English) go to Italian through the dictionary phrases first.
+- **Semantic match (optional):** the settings menu turns on a sentence encoder (`Xenova/multilingual-e5-small`, transformers.js loaded from the CDN, ~120 MB downloaded once and cached). Without it the whole-sentence step uses exact and character similarity, and paraphrases ("come va?" → "come stai") fall back to the words.
+- **Speed:** router query < 1 ms, index of a few kB, each clip ~80 kB fetched on demand. The Python router needs ~5.6 s to load (e5-base + spaCy) and ~17 ms per query, and a server.
+
+### Export the dataset for the site
+
+```bash
+npm run export:lis -- ../dataset/output_processed --source "LIS dataset"   # writes public/lis/
+```
+
+`scripts/export-lis-dataset.ts` reads every sample folder (`metadata.json` + the 4 CSV files), retargets it with the site code and writes `public/lis/index.json` and `public/lis/clips/<id>.json` (bone quaternions and face morphs at 30 fps). `metadata.json` can set `"type"` (`word` / `sentence`), `"lemma"` and `"pos"` (`VERB`, `NOUN`, …; guessed from the ending when missing). Commit `public/lis/` and the static build serves it.
+
+The repository ships a **demo** export: 13 samples synthesized by the mock model (`npm run dataset:demo -- <dir>`, then the export). **The demo handshapes are not validated LIS signs.** Without `public/lis/index.json` the site falls back to the mock model.
+
+### GitHub Pages
+
+The build uses a relative base (`base: './'` in `vite.config.ts`), so `dist/` works under any path (`https://<user>.github.io/<repo>/`). The workflow `.github/workflows/pages.yml` builds `website/` and deploys `dist/`; in the repository settings set **Pages → Source: GitHub Actions**, then run it from the Actions tab (or enable its `push` trigger).
+
 ## Motion model (text → motion)
 
-The typed phrase goes to a text-to-motion model. The model returns recording-format files (one clip per sign, or one recording of the whole phrase), and the site animates the avatar with the recording import and retargeting, joining the clips with smooth transitions. The user does not choose how the signs are produced.
+Order of the generators: a model server when `VITE_MOTION_MODEL_URL` is set, else the LIS router over `public/lis/`, else the mock. The typed phrase goes to a text-to-motion model. The model returns recording-format files (one clip per sign, or one recording of the whole phrase), and the site animates the avatar with the recording import and retargeting, joining the clips with smooth transitions. The user does not choose how the signs are produced.
 
 The real model does not exist yet. Until then, `src/generation/mockMotionModel.ts` plays its role in the browser: it splits the phrase into dictionary signs (`src/generation/signPlanner.ts`) and synthesizes one rest-to-rest clip per sign (CSV files at 30 Hz) from placeholder handshapes, the dictionary anchors and motion arcs, and arm IK, as the real model will. **The mock handshapes are not validated LIS signs.** The page shows the gloss sequence and the words it could not sign; the settings menu downloads the generated CSV files.
 

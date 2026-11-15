@@ -3,6 +3,8 @@ import { Download, Settings2, Upload, X } from 'lucide-react';
 import { BUILTIN_AVATARS, DEFAULT_AVATAR_ID, type AvatarChoice } from '../avatars/avatarCatalog';
 import type { TransitionCurve } from '../generation/stitchClips';
 import type { RecordingFileInput } from '../recording/rokokoRecording';
+import type { GeneratedMotion } from '../generation/motionModel';
+import type { SemanticState } from '../router/lisRouterModel';
 
 const FILE_OPTION = '__file__';
 
@@ -18,6 +20,11 @@ interface SettingsMenuProps {
   /** Files of the last model output (recording format). */
   outputFiles: RecordingFileInput[];
   onDownloadFile: (file: RecordingFileInput) => void;
+  /** Semantic sentence match of the router; null when the generator is not the router. */
+  semantic: SemanticState | null;
+  onToggleSemantic: (on: boolean) => void;
+  /** How the router handled the last phrase. */
+  lastRoute: GeneratedMotion['route'] | null;
 }
 
 const fieldSelect =
@@ -34,6 +41,9 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   isMockModel,
   outputFiles,
   onDownloadFile,
+  semantic,
+  onToggleSemantic,
+  lastRoute,
 }) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -150,6 +160,33 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
               )}
             </div>
             <p className="text-xs text-slate-600">{modelName}</p>
+            {semantic && (
+              <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-blue-600"
+                  checked={semantic.status === 'on' || semantic.status === 'loading'}
+                  disabled={semantic.status === 'loading'}
+                  onChange={(e) => onToggleSemantic(e.target.checked)}
+                />
+                <span>
+                  Semantic sentence match (paraphrases like “come va?” → “come stai”). Downloads a ~120 MB model once.
+                  {semantic.status === 'loading' && (
+                    <span className="block text-slate-500">
+                      Loading{semantic.fraction !== null ? ` ${Math.round(semantic.fraction * 100)}%` : '…'}
+                    </span>
+                  )}
+                  {semantic.status === 'error' && <span className="block text-red-700">{semantic.message}</span>}
+                </span>
+              </label>
+            )}
+            {lastRoute && (
+              <p className="text-xs text-slate-500">
+                Last phrase: {lastRoute.mode === 'sentence' ? 'whole sentence' : lastRoute.mode === 'words' ? 'word by word' : 'no match'}
+                {' '}({lastRoute.matcher}, {lastRoute.score.toFixed(2)})
+                {lastRoute.italian && <span className="block">Italian: “{lastRoute.italian}”</span>}
+              </p>
+            )}
             {outputFiles.length > 0 && (
               <details className="text-xs text-slate-600">
                 <summary className="cursor-pointer select-none hover:text-slate-900">
